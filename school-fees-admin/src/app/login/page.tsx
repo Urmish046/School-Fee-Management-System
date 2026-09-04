@@ -35,7 +35,7 @@ export default function LoginPage() {
 
     try {
       const response = await fetch(
-        "http://192.168.1.6:8000/api/auth/login",
+        "http://192.168.1.8:8000/api/auth/login",
         {
           method: "POST",
           headers: {
@@ -60,6 +60,7 @@ export default function LoginPage() {
 
       // Save access token
       localStorage.setItem("accessToken", data.accessToken);
+      sessionStorage.setItem("loginSession", "active");
 
       // Optional: save user information
       localStorage.setItem("user", JSON.stringify(data.user));

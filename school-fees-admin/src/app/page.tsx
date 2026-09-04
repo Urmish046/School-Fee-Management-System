@@ -1,9 +1,32 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { mockFamilies } from "@/lib/mock-data";
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  useEffect(() => {
+    const token = window.localStorage.getItem("accessToken");
+    const loginSession = window.sessionStorage.getItem("loginSession");
+    if (!token || loginSession !== "active") {
+      window.sessionStorage.removeItem("loginSession");
+      router.replace("/login");
+      setAuthChecked(true);
+      return;
+    }
+    setAuthenticated(true);
+    setAuthChecked(true);
+  }, [router]);
+
+  if (!authChecked || !authenticated) {
+    return <div className="fixed inset-0 z-[9999] min-h-screen bg-[#f4f2ee]" />;
+  }
+
   const totalFamilies = mockFamilies.length;
   const totalStudents = mockFamilies.reduce((sum, f) => sum + f.totalChildren, 0);
   const totalOutstanding = mockFamilies.reduce((sum, f) => sum + f.balance, 0);

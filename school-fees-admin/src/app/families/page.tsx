@@ -18,7 +18,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-  DialogClose,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import {
@@ -28,98 +27,156 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useState } from "react";
-import { mockFamilies, Family } from "@/lib/mock-data";
-import { mockConcessions, Concession } from "@/lib/mock-concessions";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { Pencil, Trash2 } from "lucide-react";
+import {
+  API_URL,
+  apiFamilyToFamily,
+  emptyFamilyForm,
+  formToApiPayload,
+  formatDateForDisplay,
+  getAuthHeaders,
+  type ApiFamilyListResponse,
+  type Family,
+} from "@/lib/family-adapters";
+import { deleteFamily } from "@/lib/api/families";
 
-const emptyForm = {
-  fatherName: "",
-  motherName: "",
-  cnic: "",
-  admissionDate: "",
-  contact: "",
-  motherContact: "",
-  whatsapp: "",
-  email: "",
-  emergencyContact: "",
-  address: "",
-  notes: "",
-  status: "Active" as "Active" | "Inactive",
-  scholarshipInfo: "",
-  concessionType: "" as "" | "Fixed" | "Percentage",
-  concessionValue: "",
-  concessionReason: "",
-};
+const emptyForm = emptyFamilyForm;
+const pageSize = 10;
 
 export default function FamiliesPage() {
   const [search, setSearch] = useState("");
   const [form, setForm] = useState(emptyForm);
+  const [families, setFamilies] = useState<Family[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const router = useRouter();
 
-  const filteredFamilies = mockFamilies.filter((family) =>
-    family.fatherName.toLowerCase().includes(search.toLowerCase()) ||
-    family.familyId.toLowerCase().includes(search.toLowerCase()) ||
-    family.contact.includes(search)
-  );
+  const loadFamilies = async (targetPage = page, searchTerm = search) => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const params = new URLSearchParams({
+        page: String(targetPage),
+        limit: String(pageSize),
+      });
+      if (searchTerm.trim()) params.set("search", searchTerm.trim());
 
-  const nextFamilyId = `FAM-${String(mockFamilies.length + 1).padStart(4, "0")}`;
-  const nextInternalId = String(mockFamilies.length + 1);
+      const response = await fetch(`${API_URL}/api/families?${params.toString()}`, {
+        headers: { Accept: "application/json", ...getAuthHeaders() },
+      });
+
+      const body = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(body?.error || `Families request failed: ${response.status}`);
+      }
+
+      const payload = body as ApiFamilyListResponse;
+      setFamilies(Array.isArray(payload?.data) ? payload.data.map(apiFamilyToFamily) : []);
+      setTotalPages(payload?.pagination?.totalPages ?? 1);
+      setTotalCount(payload?.pagination?.total ?? payload?.count ?? 0);
+    } catch (error) {
+      console.error("Failed to load families:", error);
+      setLoadError(error instanceof Error ? error.message : "Failed to load families.");
+      setFamilies([]);
+      toast.error("Couldn't load families", {
+        description: `Check that the API is running at ${API_URL} and that you're logged in.`,
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Reload whenever the page changes
+  useEffect(() => {
+    loadFamilies(page, search);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
+
+  // Debounce search — reset to page 1 and refetch from the server
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setPage(1);
+      loadFamilies(1, search);
+    }, 350);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   const updateField = (field: keyof typeof form, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSaveFamily = () => {
+  const handleDeleteFamily = async (family: Family) => {
+    if (!window.confirm(`Deactivate ${family.fatherName}'s family?`)) return;
+
+    setDeletingId(family.id);
+    try {
+      await deleteFamily(family.id);
+      toast.success("Family deactivated.");
+      await loadFamilies(page, search);
+    } catch (error) {
+      toast.error("Failed to deactivate family", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleSaveFamily = async () => {
     if (!form.fatherName.trim()) {
       toast.error("Father / Parent Name is required.");
       return;
     }
-
-    const newFamily: Family = {
-      id: nextInternalId,
-      familyId: nextFamilyId,
-      fatherName: form.fatherName,
-      motherName: form.motherName,
-      cnic: form.cnic,
-      contact: form.contact,
-      motherContact: form.motherContact,
-      whatsapp: form.whatsapp,
-      email: form.email,
-      address: form.address,
-      emergencyContact: form.emergencyContact,
-      notes: form.notes,
-      admissionDate: form.admissionDate,
-      scholarshipInfo: form.scholarshipInfo,
-      totalChildren: 0,
-      balance: 0,
-      status: form.status,
-      paymentStatus: "Unpaid",
-    };
-
-    mockFamilies.push(newFamily);
-
-    if (form.concessionType && form.concessionValue) {
-      const newConcession: Concession = {
-        id: `CON-${String(mockConcessions.length + 1).padStart(3, "0")}`,
-        appliesTo: "Family",
-        targetName: form.fatherName,
-        targetId: nextFamilyId,
-        type: form.concessionType,
-        value: Number(form.concessionValue) || 0,
-        reason: form.concessionReason || "Family Concession",
-        status: "Active",
-        recordType: "Concession"
-      };
-      mockConcessions.push(newConcession);
+    if (!form.contact.trim()) {
+      toast.error("Father Contact is required.");
+      return;
     }
 
-    toast.success("Family added!", {
-      description: `${nextFamilyId} has been created and is ready for student enrollment.`,
-    });
+    setSaving(true);
+    try {
+      const response = await fetch(`${API_URL}/api/families`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify(formToApiPayload(form)),
+      });
 
-    setForm(emptyForm);
+      const body = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(body?.error || `Save failed: ${response.status}`);
+      }
+
+      const created = apiFamilyToFamily(body.data);
+
+      toast.success("Family added!", {
+        description: `${created.familyId} has been created and is ready for student enrollment.`,
+      });
+      setForm(emptyForm);
+      setDialogOpen(false);
+      setPage(1);
+      await loadFamilies(1, search);
+    } catch (error) {
+      console.error("Failed to save family:", error);
+      toast.error("Failed to save family", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -132,7 +189,7 @@ export default function FamiliesPage() {
           </p>
         </div>
 
-        <Dialog>
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger className="inline-flex items-center justify-center rounded-md text-sm font-medium bg-slate-900 text-slate-50 hover:bg-slate-900/90 h-10 px-4 py-2">
             + Add Family
           </DialogTrigger>
@@ -140,8 +197,7 @@ export default function FamiliesPage() {
             <DialogHeader>
               <DialogTitle>Add New Family</DialogTitle>
               <DialogDescription>
-                Enter the details of the parents/guardians. Family ID{" "}
-                <span className="font-medium">{nextFamilyId}</span> will be assigned automatically.
+                Enter the details of the parents/guardians. A Family ID will be assigned automatically once saved.
               </DialogDescription>
             </DialogHeader>
 
@@ -275,31 +331,15 @@ export default function FamiliesPage() {
 
               <div className="space-y-1.5 sm:col-span-2 border rounded-md p-3">
                 <Label className="mb-1 block">Family Concession (optional)</Label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <Select
-                    value={form.concessionType}
-                    onValueChange={(v) => updateField("concessionType", v ?? "")}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Percentage">Percentage</SelectItem>
-                      <SelectItem value="Fixed">Fixed Amount</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    type="number"
-                    placeholder={form.concessionType === "Percentage" ? "e.g. 10" : "e.g. 1000"}
-                    value={form.concessionValue}
-                    onChange={(e) => updateField("concessionValue", e.target.value)}
-                  />
-                  <Input
-                    placeholder="Reason (e.g. Sibling discount)"
-                    value={form.concessionReason}
-                    onChange={(e) => updateField("concessionReason", e.target.value)}
-                  />
-                </div>
+                <Input
+                  type="number"
+                  placeholder="Amount, e.g. 1000"
+                  value={form.concessionValue}
+                  onChange={(e) => updateField("concessionValue", e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Stored as a single numeric amount (family_concession).
+                </p>
               </div>
 
               <div className="space-y-1.5 sm:col-span-2">
@@ -314,12 +354,14 @@ export default function FamiliesPage() {
             </div>
 
             <div className="flex justify-end pt-2">
-              <DialogClose
+              <button
+                type="button"
+                disabled={saving}
                 onClick={handleSaveFamily}
-                className="inline-flex items-center justify-center rounded-md text-sm font-medium bg-slate-900 text-white hover:bg-slate-800 h-10 px-4 py-2"
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium bg-slate-900 text-white hover:bg-slate-800 h-10 px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Save Family
-              </DialogClose>
+                {saving ? "Saving..." : "Save Family"}
+              </button>
             </div>
           </DialogContent>
         </Dialog>
@@ -327,9 +369,9 @@ export default function FamiliesPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>All Families ({filteredFamilies.length})</CardTitle>
+          <CardTitle>All Families ({totalCount})</CardTitle>
           <Input
-            placeholder="Search by name, family ID or phone..."
+            placeholder="Search by name, CNIC, contact, or email..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="max-w-sm mt-2"
@@ -341,43 +383,113 @@ export default function FamiliesPage() {
               <TableRow>
                 <TableHead>Family ID</TableHead>
                 <TableHead>Father Name</TableHead>
+                <TableHead>Mother Name</TableHead>
                 <TableHead>Contact</TableHead>
-                <TableHead>Address</TableHead>
-                <TableHead>Children</TableHead>
-                <TableHead>Balance</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead>Concession</TableHead>
+                <TableHead>Scholarship</TableHead>
+                <TableHead>Admission Date</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredFamilies.map((family) => (
-                <TableRow
-                  key={family.id}
-                  className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => router.push(`/families/${family.id}`)}
-                >
-                  <TableCell className="font-medium">{family.familyId}</TableCell>
-                  <TableCell>{family.fatherName}</TableCell>
-                  <TableCell>{family.contact}</TableCell>
-                  <TableCell>{family.address}</TableCell>
-                  <TableCell>{family.totalChildren}</TableCell>
-                  <TableCell>
-                    {family.balance > 0 ? (
-                      <span className="text-red-600 font-medium">
-                        Rs. {family.balance.toLocaleString()}
-                      </span>
-                    ) : (
-                      <span className="text-green-600 font-medium">Paid</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={family.status === "Active" ? "default" : "secondary"}>
-                      {family.status}
-                    </Badge>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                    Loading families...
                   </TableCell>
                 </TableRow>
-              ))}
+              ) : loadError ? (
+                <TableRow>
+                  <TableCell colSpan={10} className="text-center py-8">
+                    <p className="text-red-600 font-medium">{loadError}</p>
+                    <button
+                      type="button"
+                      onClick={() => loadFamilies(page, search)}
+                      className="mt-2 rounded-md border px-3 py-1.5 text-sm"
+                    >
+                      Retry
+                    </button>
+                  </TableCell>
+                </TableRow>
+              ) : families.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                    No families found.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                families.map((family) => (
+                  <TableRow
+                    key={family.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => router.push(`/families/${family.id}`)}
+                  >
+                    <TableCell className="font-medium">{family.familyId}</TableCell>
+                    <TableCell>{family.fatherName}</TableCell>
+                    <TableCell>{family.motherName || "—"}</TableCell>
+                    <TableCell>{family.contact}</TableCell>
+                    <TableCell>{family.email || "—"}</TableCell>
+                    <TableCell>
+                      {family.concession > 0 ? `Rs. ${family.concession.toLocaleString()}` : "—"}
+                    </TableCell>
+                    <TableCell>{family.scholarshipInfo || "—"}</TableCell>
+                    <TableCell>{formatDateForDisplay(family.admissionDate)}</TableCell>
+                    <TableCell>
+                      <Badge variant={family.status === "Active" ? "default" : "secondary"}>
+                        {family.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
+                        <button
+                          type="button"
+                          title="Edit family"
+                          onClick={() => router.push(`/families/${family.id}`)}
+                          className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-sm hover:bg-muted"
+                        >
+                          <Pencil className="h-3.5 w-3.5" /> Edit
+                        </button>
+                        <button
+                          type="button"
+                          title="Delete family"
+                          disabled={deletingId === family.id}
+                          onClick={() => handleDeleteFamily(family)}
+                          className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" /> {deletingId === family.id ? "Deleting..." : "Delete"}
+                        </button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-sm text-muted-foreground">
+            <span>
+              Page {page} of {totalPages} &middot; {totalCount} total
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={page === 1 || loading}
+                onClick={() => setPage((value) => Math.max(1, value - 1))}
+                className="rounded-md border px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                disabled={page === totalPages || loading}
+                onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                className="rounded-md border px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>

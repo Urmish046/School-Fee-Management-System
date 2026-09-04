@@ -1,18 +1,16 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, CreditCard, Receipt, Percent } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -21,365 +19,368 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { toast } from "sonner";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { ReceiptModal } from "@/components/ui/receipt-modal";
-import { mockFamilies } from "@/lib/mock-data";
-import { mockStudentsFull } from "@/lib/mock-students-full";
-import { mockConcessions, applyConcession } from "@/lib/mock-concessions";
+  API_URL,
+  apiFamilyToForm,
+  formToApiPayload,
+  getAuthHeaders,
+  type ApiFamily,
+  type FamilyFormValues,
+} from "@/lib/family-adapters";
 
-export default function FamilyDetailsPage() {
-  const params = useParams();
+export default function FamilyDetailPage() {
+  const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const familyRouteId = params.id as string;
 
-  const family = mockFamilies.find((f) => f.id === familyRouteId);
+  const [form, setForm] = useState<FamilyFormValues | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
-  if (!family) {
+  const loadFamily = async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const response = await fetch(`${API_URL}/api/families/${id}`, {
+        headers: { Accept: "application/json", ...getAuthHeaders() },
+      });
+
+      const body = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(body?.error || `Failed to load family: ${response.status}`);
+      }
+
+      setForm(apiFamilyToForm(body.data as ApiFamily));
+    } catch (error) {
+      console.error("Failed to load family:", error);
+      setLoadError(error instanceof Error ? error.message : "Failed to load family.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (id) loadFamily();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  const updateField = (field: keyof FamilyFormValues, value: string) => {
+    setForm((prev) => (prev ? { ...prev, [field]: value } : prev));
+  };
+
+  const handleSave = async () => {
+    if (!form) return;
+
+    if (!form.fatherName.trim()) {
+      toast.error("Father / Parent Name is required.");
+      return;
+    }
+    if (!form.contact.trim()) {
+      toast.error("Father Contact is required.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const response = await fetch(`${API_URL}/api/families/${id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify(formToApiPayload(form)),
+      });
+
+      const body = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(body?.error || `Update failed: ${response.status}`);
+      }
+
+      setForm(apiFamilyToForm(body.data as ApiFamily));
+      toast.success("Family updated.");
+    } catch (error) {
+      console.error("Failed to update family:", error);
+      toast.error("Failed to update family", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      const response = await fetch(`${API_URL}/api/families/${id}`, {
+        method: "DELETE",
+        headers: { Accept: "application/json", ...getAuthHeaders() },
+      });
+
+      const body = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(body?.error || `Delete failed: ${response.status}`);
+      }
+
+      // Your backend soft-deletes (is_active = false) rather than removing the row.
+      toast.success("Family deactivated.");
+      setDeleteDialogOpen(false);
+      router.push("/families");
+    } catch (error) {
+      console.error("Failed to deactivate family:", error);
+      toast.error("Failed to deactivate family", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  if (loading) {
     return (
       <div className="p-6">
-        <p className="text-muted-foreground">Family not found.</p>
-        <Button variant="outline" className="mt-4" onClick={() => router.push("/families")}>
-          Back to Families
-        </Button>
+        <p className="text-muted-foreground">Loading family...</p>
       </div>
     );
   }
 
-  // Real children linked to this family via familyId (e.g. "FAM-0001")
-  const children = mockStudentsFull.filter((s) => s.familyId === family.familyId);
-
-  // Concessions that apply to this whole family, or to any of its individual children
-  const applicableConcessions = mockConcessions.filter(
-    (c) =>
-      c.status === "Active" &&
-      ((c.appliesTo === "Family" && c.targetId === family.familyId) ||
-        (c.appliesTo === "Student" && children.some((ch) => ch.id === c.targetId)))
-  );
-
-  const grossFee = children.reduce((sum, c) => sum + c.monthlyFee, 0);
-  const totalDiscount = applicableConcessions.reduce((sum, c) => {
-    const relevantFee =
-      c.appliesTo === "Family"
-        ? grossFee
-        : children.find((ch) => ch.id === c.targetId)?.monthlyFee || 0;
-    return sum + (relevantFee - applyConcession(relevantFee, c));
-  }, 0);
-  const netPayable = grossFee - totalDiscount;
-
-  const paymentHistory = [
-    { date: "10 Aug 2026", amount: `Rs. ${netPayable.toLocaleString()}`, method: "Cash", receipt: "REC-001" },
-    { date: "12 Jul 2026", amount: `Rs. ${netPayable.toLocaleString()}`, method: "Bank Transfer", receipt: "REC-002" },
-  ];
+  if (loadError || !form) {
+    return (
+      <div className="p-6 space-y-4">
+        <p className="text-red-600 font-medium">{loadError ?? "Family not found."}</p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={loadFamily}
+            className="rounded-md border px-3 py-1.5 text-sm"
+          >
+            Retry
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push("/families")}
+            className="rounded-md border px-3 py-1.5 text-sm"
+          >
+            Back to Families
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header & Navigation */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="outline" size="icon" onClick={() => router.back()}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div>
-            <h1 className="text-2xl font-bold">
-              Family Details: {family.familyId}
-            </h1>
-            <p className="text-muted-foreground">
-              {family.fatherName} | {family.contact}
-            </p>
+        <div>
+          <button
+            type="button"
+            onClick={() => router.push("/families")}
+            className="text-sm text-muted-foreground hover:underline mb-1"
+          >
+            &larr; Back to Families
+          </button>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold">{form.fatherName || "Family"}</h1>
+            <Badge variant={form.status === "Active" ? "default" : "secondary"}>
+              {form.status}
+            </Badge>
           </div>
+          <p className="text-sm text-muted-foreground">Family ID: FAM-{String(id).padStart(4, "0")}</p>
         </div>
-        <div className="flex gap-2">
-          {/* Generate Challan Dialog */}
-          <Dialog>
-            <DialogTrigger className="inline-flex items-center justify-center rounded-md text-sm font-medium border border-input bg-background hover:bg-slate-100 h-10 px-4 py-2">
-              <Receipt className="mr-2 h-4 w-4" /> Generate Challan
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[425px]">
-              <DialogHeader>
-                <DialogTitle>Generate Family Challan</DialogTitle>
-                <DialogDescription>
-                  Are you sure you want to generate a new challan for this family? This will consolidate all children&apos;s fees, active concessions, and previous arrears.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="py-4 space-y-2">
-                <div className="flex justify-between border-b pb-2">
-                  <span className="text-sm font-medium">Billing Month</span>
-                  <span className="text-sm text-muted-foreground">September 2026</span>
-                </div>
-                <div className="flex justify-between border-b pb-2">
-                  <span className="text-sm font-medium">Gross Fee</span>
-                  <span className="text-sm text-muted-foreground">
-                    Rs. {grossFee.toLocaleString()}
-                  </span>
-                </div>
-                {totalDiscount > 0 && (
-                  <div className="flex justify-between border-b pb-2">
-                    <span className="text-sm font-medium">Concession Applied</span>
-                    <span className="text-sm text-green-600">
-                      - Rs. {totalDiscount.toLocaleString()}
-                    </span>
-                  </div>
-                )}
-                <div className="flex justify-between border-b pb-2">
-                  <span className="text-sm font-medium">Total Payable</span>
-                  <span className="text-sm font-bold">Rs. {netPayable.toLocaleString()}</span>
-                </div>
-              </div>
-              <div className="flex justify-end gap-2 mt-4">
-                <Button variant="outline">Cancel</Button>
-                <Button
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
-                  onClick={() => router.push("/fees")}
-                >
-                  Generate & Print PDF
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
 
-          {/* Receive Payment Dialog Popup */}
-          <Dialog>
-            <DialogTrigger className="inline-flex items-center justify-center rounded-md text-sm font-medium bg-green-600 text-white hover:bg-green-700 h-10 px-4 py-2">
-              <CreditCard className="mr-2 h-4 w-4" /> Receive Payment
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[425px]">
-              <DialogHeader>
-                <DialogTitle>Receive Payment</DialogTitle>
-                <DialogDescription>
-                  Record a fee payment for this family. Fill in the details below.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="amount" className="text-right">Amount</Label>
-                  <Input
-                    id="amount"
-                    type="number"
-                    placeholder={`e.g. ${netPayable}`}
-                    className="col-span-3"
-                  />
-                </div>
-
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="method" className="text-right">Method</Label>
-                  <div className="col-span-3">
-                    <Select>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select payment method" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Cash">Cash</SelectItem>
-                        <SelectItem value="Bank">Bank</SelectItem>
-                        <SelectItem value="Online Transfer">Online Transfer</SelectItem>
-                        <SelectItem value="JazzCash">JazzCash</SelectItem>
-                        <SelectItem value="Easypaisa">Easypaisa</SelectItem>
-                        <SelectItem value="Cheque">Cheque</SelectItem>
-                        <SelectItem value="Credit Card">Credit Card</SelectItem>
-                        <SelectItem value="Debit Card">Debit Card</SelectItem>
-                        <SelectItem value="Other">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="date" className="text-right">Date</Label>
-                  <Input id="date" type="date" className="col-span-3" />
-                </div>
-
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="remarks" className="text-right">Remarks</Label>
-                  <Input id="remarks" placeholder="Optional notes..." className="col-span-3" />
-                </div>
-              </div>
-              <div className="flex justify-end">
-                <Button type="submit" className="bg-green-600 hover:bg-green-700 text-white">
-                  Save Payment
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-        </div>
+        <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <DialogTrigger className="inline-flex items-center justify-center rounded-md text-sm font-medium border border-red-200 text-red-600 hover:bg-red-50 h-10 px-4 py-2">
+            Deactivate Family
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Deactivate this family?</DialogTitle>
+              <DialogDescription>
+                This marks the family as inactive rather than deleting the record outright. You can
+                reactivate it later by editing the status below.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteDialogOpen(false)}
+                className="rounded-md border px-4 py-2 text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={handleDelete}
+                className="rounded-md bg-red-600 text-white px-4 py-2 text-sm hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? "Deactivating..." : "Deactivate"}
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Family Financial Overview Card */}
-        <Card className="col-span-1">
-          <CardHeader>
-            <CardTitle>Financial Overview</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex justify-between items-center border-b pb-2">
-              <span className="text-muted-foreground">Current Status</span>
-              <Badge variant={family.status === "Active" ? "default" : "secondary"}>
-                {family.status}
-              </Badge>
-            </div>
-            <div className="flex justify-between items-center border-b pb-2">
-              <span className="text-muted-foreground">Gross Fee</span>
-              <span className={totalDiscount > 0 ? "text-muted-foreground line-through" : "font-bold text-lg"}>
-                Rs. {grossFee.toLocaleString()}
-              </span>
-            </div>
-            {totalDiscount > 0 && (
-              <div className="flex justify-between items-center border-b pb-2">
-                <span className="text-muted-foreground">Total Payable (after discount)</span>
-                <span className="font-bold text-lg text-green-700">
-                  Rs. {netPayable.toLocaleString()}
-                </span>
-              </div>
-            )}
-            <div className="flex justify-between items-center border-b pb-2">
-              <span className="text-muted-foreground">Previous Arrears</span>
-              <span className="text-red-500 font-medium">Rs. 0</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Children List Card */}
-        <Card className="col-span-2">
-          <CardHeader>
-            <CardTitle>Enrolled Children</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {children.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-6 text-center">
-                No children linked to this family yet.
-              </p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Student ID</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Class</TableHead>
-                    <TableHead>Monthly Fee</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {children.map((child) => (
-                    <TableRow
-                      key={child.id}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => router.push(`/students/${child.id}`)}
-                    >
-                      <TableCell className="font-medium">{child.id}</TableCell>
-                      <TableCell>{child.name}</TableCell>
-                      <TableCell>{child.className}</TableCell>
-                      <TableCell>Rs. {child.monthlyFee.toLocaleString()}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Concessions & Scholarships Card */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Percent className="h-4 w-4" /> Concessions & Scholarships
-          </CardTitle>
+          <CardTitle>Family Details</CardTitle>
         </CardHeader>
         <CardContent>
-          {applicableConcessions.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">
-              No active concessions or scholarships for this family.
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Applies To</TableHead>
-                  <TableHead>Discount</TableHead>
-                  <TableHead>Reason</TableHead>
-                  <TableHead className="text-right">Amount Reduced</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {applicableConcessions.map((c) => {
-                  const relevantFee =
-                    c.appliesTo === "Family"
-                      ? grossFee
-                      : children.find((ch) => ch.id === c.targetId)?.monthlyFee || 0;
-                  const reduced = relevantFee - applyConcession(relevantFee, c);
-                  return (
-                    <TableRow key={c.id}>
-                      <TableCell>
-                        <Badge variant="secondary">{c.appliesTo}</Badge>{" "}
-                        {c.appliesTo === "Student" ? c.targetName : "Whole Family"}
-                      </TableCell>
-                      <TableCell className="font-medium text-blue-700">
-                        {c.type === "Percentage" ? `${c.value}%` : `Rs. ${c.value.toLocaleString()}`}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">{c.reason}</TableCell>
-                      <TableCell className="text-right text-green-600 font-semibold">
-                        - Rs. {reduced.toLocaleString()}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="fatherName">Father / Parent Name</Label>
+              <Input
+                id="fatherName"
+                value={form.fatherName}
+                onChange={(e) => updateField("fatherName", e.target.value)}
+              />
+            </div>
 
-      {family.scholarshipInfo && (
-  <Card>
-    <CardHeader>
-      <CardTitle>Scholarship Information</CardTitle>
-    </CardHeader>
-    <CardContent>
-      <p className="text-sm text-muted-foreground">{family.scholarshipInfo}</p>
-    </CardContent>
-  </Card>
-)}
-      {/* Payment History Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent Payment History</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Receipt No.</TableHead>
-                <TableHead>Method</TableHead>
-                <TableHead>Amount Paid</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {paymentHistory.map((payment, index) => (
-                <TableRow key={index}>
-                  <TableCell>{payment.date}</TableCell>
-                  <TableCell>
-                    <ReceiptModal
-                      receiptNo={payment.receipt}
-                      date={payment.date}
-                      month="August 2026"
-                      method={payment.method}
-                      amount={payment.amount}
-                      receivedFrom={`${family.fatherName} (${family.familyId})`}
-                    />
-                  </TableCell>
-                  <TableCell>{payment.method}</TableCell>
-                  <TableCell className="text-green-600 font-medium">{payment.amount}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+            <div className="space-y-1.5">
+              <Label htmlFor="motherName">Mother Name</Label>
+              <Input
+                id="motherName"
+                value={form.motherName}
+                onChange={(e) => updateField("motherName", e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="cnic">CNIC</Label>
+              <Input
+                id="cnic"
+                value={form.cnic}
+                onChange={(e) => updateField("cnic", e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="admissionDate">Admission Date</Label>
+              <Input
+                id="admissionDate"
+                type="date"
+                value={form.admissionDate}
+                onChange={(e) => updateField("admissionDate", e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="fatherContact">Father Contact</Label>
+              <Input
+                id="fatherContact"
+                value={form.contact}
+                onChange={(e) => updateField("contact", e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="motherContact">Mother Contact</Label>
+              <Input
+                id="motherContact"
+                value={form.motherContact}
+                onChange={(e) => updateField("motherContact", e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="whatsapp">WhatsApp Number</Label>
+              <Input
+                id="whatsapp"
+                value={form.whatsapp}
+                onChange={(e) => updateField("whatsapp", e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                value={form.email}
+                onChange={(e) => updateField("email", e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="emergencyContact">Emergency Contact</Label>
+              <Input
+                id="emergencyContact"
+                value={form.emergencyContact}
+                onChange={(e) => updateField("emergencyContact", e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="status">Active/Inactive Status</Label>
+              <Select
+                value={form.status}
+                onValueChange={(v) => updateField("status", (v ?? "Active") as "Active" | "Inactive")}
+              >
+                <SelectTrigger id="status">
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Active">Active</SelectItem>
+                  <SelectItem value="Inactive">Inactive</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="address">Address</Label>
+              <Input
+                id="address"
+                value={form.address}
+                onChange={(e) => updateField("address", e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="scholarshipInfo">Scholarship Information</Label>
+              <Input
+                id="scholarshipInfo"
+                value={form.scholarshipInfo}
+                onChange={(e) => updateField("scholarshipInfo", e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="concessionValue">Family Concession (amount)</Label>
+              <Input
+                id="concessionValue"
+                type="number"
+                value={form.concessionValue}
+                onChange={(e) => updateField("concessionValue", e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="notes">Notes</Label>
+              <Input
+                id="notes"
+                value={form.notes}
+                onChange={(e) => updateField("notes", e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-6">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={handleSave}
+              className="inline-flex items-center justify-center rounded-md text-sm font-medium bg-slate-900 text-white hover:bg-slate-800 h-10 px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {saving ? "Saving..." : "Save Changes"}
+            </button>
+          </div>
         </CardContent>
       </Card>
     </div>
