@@ -360,7 +360,7 @@ export default function StudentsPage() {
                   <Select
                     value={addForm.familyId}
                     onValueChange={(value) =>
-                      setAddForm((f) => ({ ...f, familyId: value }))
+                      setAddForm((f) => ({ ...f, familyId: value ?? "" }))
                     }
                   >
                     <SelectTrigger>
@@ -431,7 +431,7 @@ export default function StudentsPage() {
                     onValueChange={(value) =>
                       setAddForm((f) => ({
                         ...f,
-                        classId: value,
+                        classId: value ?? "",
                         sectionId: "",
                       }))
                     }
@@ -454,7 +454,7 @@ export default function StudentsPage() {
                   <Select
                     value={addForm.sectionId}
                     onValueChange={(value) =>
-                      setAddForm((f) => ({ ...f, sectionId: value }))
+                      setAddForm((f) => ({ ...f, sectionId: value ?? "" }))
                     }
                     disabled={!addForm.classId}
                   >
@@ -614,7 +614,7 @@ export default function StudentsPage() {
               <Select
                 value={editForm.familyId}
                 onValueChange={(value) =>
-                  setEditForm((f) => ({ ...f, familyId: value }))
+                  setEditForm((f) => ({ ...f, familyId: value ?? "" }))
                 }
               >
                 <SelectTrigger>
@@ -679,7 +679,7 @@ export default function StudentsPage() {
               <Select
                 value={editForm.classId}
                 onValueChange={(value) =>
-                  setEditForm((f) => ({ ...f, classId: value, sectionId: "" }))
+                  setEditForm((f) => ({ ...f, classId: value ?? "", sectionId: "" }))
                 }
               >
                 <SelectTrigger>
@@ -700,7 +700,7 @@ export default function StudentsPage() {
               <Select
                 value={editForm.sectionId}
                 onValueChange={(value) =>
-                  setEditForm((f) => ({ ...f, sectionId: value }))
+                  setEditForm((f) => ({ ...f, sectionId: value ?? "" }))
                 }
                 disabled={!editForm.classId}
               >
