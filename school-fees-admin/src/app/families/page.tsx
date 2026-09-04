@@ -110,6 +110,7 @@ export default function FamiliesPage() {
         value: Number(form.concessionValue) || 0,
         reason: form.concessionReason || "Family Concession",
         status: "Active",
+        recordType: "Concession"
       };
       mockConcessions.push(newConcession);
     }

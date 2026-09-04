@@ -175,6 +175,9 @@ export default function StudentsPage() {
                       <SelectItem value="Active">Active</SelectItem>
                       <SelectItem value="Inactive">Inactive</SelectItem>
                       <SelectItem value="Suspended">Suspended</SelectItem>
+                                            <SelectItem value="Suspended">Withdrawn</SelectItem>
+                      <SelectItem value="Graduated">Graduated</SelectItem>
+
                     </SelectContent>
                   </Select>
                 </div>
@@ -262,8 +265,14 @@ export default function StudentsPage() {
                         student.status === "Active"
                           ? "default"
                           : student.status === "Suspended"
-                          ? "destructive"
-                          : "secondary"
+                            ? "destructive"
+                            : student.status === "Inactive"
+                              ? "destructive"
+                              : student.status === "Withdrawn"
+                              ? "destructive"
+                              : student.status === "Graduated"
+                                ? "secondary"
+                                : "secondary"
                       }
                     >
                       {student.status}

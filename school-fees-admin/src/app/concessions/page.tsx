@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { mockConcessions } from "@/lib/mock-concessions";
+import { useState, type MouseEvent } from "react";
+import { mockConcessions, type Concession } from "@/lib/mock-concessions";
 import {
   Table,
   TableBody,
@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -35,21 +36,80 @@ import { toast } from "sonner";
 export default function ConcessionsPage() {
   const [search, setSearch] = useState("");
   const [entryType, setEntryType] = useState<string>("Concession");
+  const [concessions, setConcessions] = useState<Concession[]>(mockConcessions);
+  const [auditTrail, setAuditTrail] = useState<{ id: string; action: string; details: string; date: string }[]>([]);
+  const [appliesTo, setAppliesTo] = useState("Family");
+  const [targetId, setTargetId] = useState("");
+  const [scholarshipName, setScholarshipName] = useState("");
+  const [discountType, setDiscountType] = useState("Percentage");
+  const [value, setValue] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [reason, setReason] = useState("");
+  const [approval, setApproval] = useState("Approved");
+  const [remarks, setRemarks] = useState("");
 
   const handleEntryTypeChange = (value: string | null) => {
     setEntryType(value ?? "Concession");
   };
 
-  const filtered = mockConcessions.filter(
+  const filtered = concessions.filter(
     (c) =>
       c.targetName.toLowerCase().includes(search.toLowerCase()) ||
       c.targetId.toLowerCase().includes(search.toLowerCase()) ||
       c.reason.toLowerCase().includes(search.toLowerCase())
   );
 
-  const activeCount = mockConcessions.filter((c) => c.status === "Active").length;
+  const activeCount = concessions.filter((c) => c.status === "Active").length;
 
-  const handleSave = () => {
+  const resetForm = () => {
+    setTargetId("");
+    setScholarshipName("");
+    setValue("");
+    setStartDate("");
+    setEndDate("");
+    setReason("");
+    setRemarks("");
+  };
+
+  const handleSave = (event: MouseEvent<HTMLButtonElement>) => {
+    const numericValue = Number(value);
+    if (!targetId || !reason || !value || numericValue < 0 || (discountType === "Percentage" && numericValue > 100)) {
+      event.preventDefault();
+      toast.error("Complete the required fields", { description: "Select a target, enter a reason and provide a valid discount value." });
+      return;
+    }
+    if (entryType === "Scholarship" && (!scholarshipName || !startDate || !endDate)) {
+      event.preventDefault();
+      toast.error("Complete the scholarship details", { description: "Name, start date and end date are required." });
+      return;
+    }
+
+    const targetName = targetId.startsWith("FAM")
+      ? targetId === "FAM-0001" ? "Muhammad Arshad" : targetId === "FAM-0002" ? "Imran Khan" : "Tariq Mahmood"
+      : targetId === "STD-001" ? "Ali Arshad" : "Sara Khan";
+    const idPrefix = entryType === "Scholarship" ? "SCH" : "CON";
+    const newId = `${idPrefix}-${String(concessions.length + 1).padStart(3, "0")}`;
+    const newRecord: Concession = {
+      id: newId,
+      recordType: entryType as Concession["recordType"],
+      appliesTo: appliesTo as Concession["appliesTo"],
+      targetName,
+      targetId,
+      type: discountType as Concession["type"],
+      value: numericValue,
+      reason,
+      status: "Active",
+      ...(entryType === "Scholarship" ? { scholarshipName, startDate, endDate, approval: approval as Concession["approval"], remarks } : {}),
+    };
+    setConcessions((current) => [...current, newRecord]);
+    setAuditTrail((current) => [{
+      id: `AUD-${String(current.length + 1).padStart(3, "0")}`,
+      action: `Created ${entryType}`,
+      details: `${newId} for ${targetName} (${discountType === "Percentage" ? `${numericValue}%` : `Rs. ${numericValue.toLocaleString()}`})`,
+      date: new Date().toLocaleString(),
+    }, ...current]);
+    resetForm();
     toast.success(
       entryType === "Scholarship" ? "Scholarship saved!" : "Concession added!",
       {
@@ -105,7 +165,7 @@ export default function ConcessionsPage() {
               <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
                 <Label className="sm:text-right">Applies To</Label>
                 <div className="w-full">
-                  <Select defaultValue="Family">
+                  <Select value={appliesTo} onValueChange={(value) => setAppliesTo(value ?? "Family")}>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Select level..." />
                     </SelectTrigger>
@@ -121,7 +181,7 @@ export default function ConcessionsPage() {
               <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
                 <Label className="sm:text-right">Family / Student</Label>
                 <div className="w-full">
-                  <Select>
+                  <Select value={targetId} onValueChange={(value) => setTargetId(value ?? "")}>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Select..." />
                     </SelectTrigger>
@@ -143,6 +203,8 @@ export default function ConcessionsPage() {
                   <Input
                     placeholder="e.g. Merit Scholarship 2026"
                     className="w-full"
+                    value={scholarshipName}
+                    onChange={(event) => setScholarshipName(event.target.value)}
                   />
                 </div>
               )}
@@ -151,7 +213,7 @@ export default function ConcessionsPage() {
               <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
                 <Label className="sm:text-right">Discount Type</Label>
                 <div className="w-full">
-                  <Select defaultValue="Percentage">
+                  <Select value={discountType} onValueChange={(value) => setDiscountType(value ?? "Percentage")}>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Select type..." />
                     </SelectTrigger>
@@ -170,6 +232,10 @@ export default function ConcessionsPage() {
                   type="number"
                   placeholder="e.g. 10 or 1000"
                   className="w-full"
+                  min="0"
+                  max={discountType === "Percentage" ? "100" : undefined}
+                  value={value}
+                  onChange={(event) => setValue(event.target.value)}
                 />
               </div>
 
@@ -177,7 +243,7 @@ export default function ConcessionsPage() {
               {entryType === "Scholarship" && (
                 <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
                   <Label className="sm:text-right">Start Date</Label>
-                  <Input type="date" className="w-full" />
+                  <Input type="date" className="w-full" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
                 </div>
               )}
 
@@ -185,7 +251,7 @@ export default function ConcessionsPage() {
               {entryType === "Scholarship" && (
                 <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
                   <Label className="sm:text-right">End Date</Label>
-                  <Input type="date" className="w-full" />
+                  <Input type="date" className="w-full" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
                 </div>
               )}
 
@@ -195,6 +261,8 @@ export default function ConcessionsPage() {
                 <Input
                   placeholder={entryType === "Scholarship" ? "e.g. Merit Scholarship" : "e.g. Sibling Discount"}
                   className="w-full"
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
                 />
               </div>
 
@@ -203,7 +271,7 @@ export default function ConcessionsPage() {
                 <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
                   <Label className="sm:text-right">Approval</Label>
                   <div className="w-full">
-                    <Select defaultValue="Approved">
+                    <Select value={approval} onValueChange={(value) => setApproval(value ?? "Approved")}>
                       <SelectTrigger className="w-full">
                         <SelectValue placeholder="Select approval..." />
                       </SelectTrigger>
@@ -221,9 +289,11 @@ export default function ConcessionsPage() {
               {entryType === "Scholarship" && (
                 <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-start">
                   <Label className="sm:text-right pt-2">Remarks</Label>
-                  <Input
+                  <Textarea
                     placeholder="Optional notes"
                     className="w-full"
+                    value={remarks}
+                    onChange={(event) => setRemarks(event.target.value)}
                   />
                 </div>
               )}
@@ -250,7 +320,7 @@ export default function ConcessionsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{mockConcessions.length}</p>
+            <p className="text-2xl font-bold">{concessions.length}</p>
           </CardContent>
         </Card>
         <Card>
@@ -271,8 +341,8 @@ export default function ConcessionsPage() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold">
-              {mockConcessions.filter((c) => c.appliesTo === "Family").length} /{" "}
-              {mockConcessions.filter((c) => c.appliesTo === "Student").length}
+              {concessions.filter((c) => c.appliesTo === "Family").length} /{" "}
+              {concessions.filter((c) => c.appliesTo === "Student").length}
             </p>
           </CardContent>
         </Card>
@@ -306,7 +376,10 @@ export default function ConcessionsPage() {
                 <TableRow key={c.id} className="hover:bg-muted/50">
                   <TableCell className="font-medium">{c.id}</TableCell>
                   <TableCell>
-                    <Badge variant="secondary">{c.appliesTo}</Badge>
+                    <div className="flex flex-col gap-1">
+                      <Badge variant="secondary">{c.appliesTo}</Badge>
+                      <span className="text-xs text-muted-foreground">{c.recordType}</span>
+                    </div>
                   </TableCell>
                   <TableCell>
                     {c.targetName}{" "}
@@ -325,6 +398,28 @@ export default function ConcessionsPage() {
               ))}
             </TableBody>
           </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Audit Trail ({auditTrail.length})</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {auditTrail.length === 0 ? (
+            <p className="text-sm text-muted-foreground">New concession and scholarship changes will appear here.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow><TableHead>Action</TableHead><TableHead>Details</TableHead><TableHead>Date</TableHead></TableRow>
+              </TableHeader>
+              <TableBody>
+                {auditTrail.map((entry) => (
+                  <TableRow key={entry.id}><TableCell className="font-medium">{entry.action}</TableCell><TableCell>{entry.details}</TableCell><TableCell className="text-muted-foreground">{entry.date}</TableCell></TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </div>

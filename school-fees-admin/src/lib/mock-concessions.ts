@@ -1,5 +1,6 @@
 export type Concession = {
   id: string;
+  recordType: "Concession" | "Scholarship";
   appliesTo: "Family" | "Student";
   targetName: string;
   targetId: string;
@@ -7,11 +8,17 @@ export type Concession = {
   value: number; // amount in Rs if Fixed, percent (0-100) if Percentage
   reason: string;
   status: "Active" | "Inactive";
+  scholarshipName?: string;
+  startDate?: string;
+  endDate?: string;
+  approval?: "Approved" | "Pending" | "Rejected";
+  remarks?: string;
 };
 
 export const mockConcessions: Concession[] = [
   {
     id: "CON-001",
+    recordType: "Concession",
     appliesTo: "Family",
     targetName: "Muhammad Arshad",
     targetId: "FAM-0001",
@@ -22,6 +29,7 @@ export const mockConcessions: Concession[] = [
   },
   {
     id: "CON-002",
+    recordType: "Concession",
     appliesTo: "Student",
     targetName: "Sara Khan",
     targetId: "STD-003",
@@ -32,6 +40,7 @@ export const mockConcessions: Concession[] = [
   },
   {
     id: "CON-003",
+    recordType: "Concession",
     appliesTo: "Family",
     targetName: "Tariq Mahmood",
     targetId: "FAM-0003",
@@ -42,6 +51,7 @@ export const mockConcessions: Concession[] = [
   },
   {
     id: "CON-004",
+    recordType: "Concession",
     appliesTo: "Student",
     targetName: "Bilal Mehmood",
     targetId: "STD-004",
