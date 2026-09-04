@@ -38,6 +38,15 @@ export type ClassPayload = {
   fees: ClassFeeInput[];
 };
 
+// Section shape returned by GET /api/class-fees/classes/:classId/sections
+// (matches getSectionsByClass() in classFeeModel.js, i.e. the raw `sections`
+// table row — includes class_id, unlike the leaner ApiClassSection above).
+export type ApiSection = {
+  id: number;
+  class_id: number;
+  name: string;
+};
+
 async function readResponse(response: Response) {
   const body = await response.json().catch(() => null);
   if (!response.ok)
@@ -59,6 +68,9 @@ export async function listClasses(page: number, limit: number, search = "") {
 
 // NEW
 export async function listFeeComponents() {
+  // FIX: this previously pointed at /api/fee-components, which doesn't
+  // exist — server.js mounts the fee-structure router at /api/fees, and
+  // its routes file defines the components endpoint as /components.
   const response = await fetch(apiUrl("/api/fees/components"), {
     headers: { Accept: "application/json", ...getAuthHeaders() },
   });
@@ -92,4 +104,33 @@ export async function deleteClass(id: number) {
     headers: { Accept: "application/json", ...getAuthHeaders() },
   });
   return readResponse(response);
+}
+
+// NEW: single class lookup — used on the student detail page to show the
+// class's total base fee (per-student fee isn't stored; it's derived from
+// the class's fee structure).
+export async function getClass(id: number | string) {
+  const response = await fetch(apiUrl(`/api/class-fees/${id}`), {
+    headers: { Accept: "application/json", ...getAuthHeaders() },
+  });
+  return readResponse(response) as Promise<{
+    success: boolean;
+    data: ApiClass;
+  }>;
+}
+
+// NEW: for the Student form's Class -> Section dependent selects.
+// Backend route: GET /api/class-fees/classes/:classId/sections
+// (unauthenticated by role — any logged-in user can read it, per classFeeRoutes.js)
+export async function getSectionsByClass(classId: number) {
+  const response = await fetch(
+    apiUrl(`/api/class-fees/classes/${classId}/sections`),
+    {
+      headers: { Accept: "application/json", ...getAuthHeaders() },
+    },
+  );
+  return readResponse(response) as Promise<{
+    success: boolean;
+    data: ApiSection[];
+  }>;
 }

@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { mockStudentsFull } from "@/lib/mock-students-full";
+import { toast } from "sonner";
 import {
   Table,
   TableBody,
@@ -14,6 +14,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -31,25 +32,276 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { toast } from "sonner";
+import { Pencil, Trash2 } from "lucide-react";
 import { ImportModal } from "@/components/import-modal";
+import {
+  createStudent,
+  deleteStudent,
+  listStudents,
+  updateStudent,
+  type ApiStudentListItem,
+  type StudentGender,
+  type StudentPayload,
+  type StudentStatus,
+  type StudentUpdatePayload,
+} from "@/lib/api/students";
+import { listClasses, type ApiClass } from "@/lib/api/classes";
+import { listFamilies } from "@/lib/api/families";
+import type { ApiFamily } from "@/lib/family-adapters";
+
+const STATUS_OPTIONS: StudentStatus[] = [
+  "Active",
+  "Inactive",
+  "Suspended",
+  "Withdrawn",
+  "Graduated",
+];
+
+const GENDER_OPTIONS: StudentGender[] = ["Male", "Female", "Other"];
+
+type StudentFormState = {
+  admissionNumber: string;
+  studentName: string;
+  familyId: string; // Select values are strings; parsed to number on submit
+  motherName: string;
+  dateOfBirth: string;
+  gender: StudentGender | "";
+  classId: string;
+  sectionId: string;
+  rollNumber: string;
+  admissionDate: string;
+  contact: string;
+  address: string;
+  academicSessionId: string;
+  status: StudentStatus;
+};
+
+const emptyForm: StudentFormState = {
+  admissionNumber: "",
+  studentName: "",
+  familyId: "",
+  motherName: "",
+  dateOfBirth: "",
+  gender: "",
+  classId: "",
+  sectionId: "",
+  rollNumber: "",
+  admissionDate: "",
+  contact: "",
+  address: "",
+  academicSessionId: "1",
+  status: "Active",
+};
+
+const familyLabel = (f: ApiFamily) =>
+  `${f.father_parent_name} (FAM-${String(f.id).padStart(4, "0")})`;
 
 export default function StudentsPage() {
   const router = useRouter();
-  const [search, setSearch] = useState("");
 
-  const handleSaveStudent = () => {
-    toast.success("Student successfully added!", {
-      description: "The student has been linked to the family profile.",
-    });
+  const [search, setSearch] = useState("");
+  const [students, setStudents] = useState<ApiStudentListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [count, setCount] = useState(0);
+
+  const [families, setFamilies] = useState<ApiFamily[]>([]);
+  const [classes, setClasses] = useState<ApiClass[]>([]);
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState<StudentFormState>(emptyForm);
+  const [saving, setSaving] = useState(false);
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<StudentFormState>(emptyForm);
+  const [updating, setUpdating] = useState(false);
+
+  // Reference data — families and classes rarely change mid-session, so
+  // load once. (Classes list is capped at 100; raise the limit if you
+  // expect more.)
+  useEffect(() => {
+    listFamilies(1, 100)
+      .then((result) => setFamilies(result.data ?? []))
+      .catch((error) =>
+        toast.error("Unable to load families", {
+          description:
+            error instanceof Error ? error.message : "Check the families API.",
+        }),
+      );
+
+    listClasses(1, 100)
+      .then((result) => setClasses(result.data ?? []))
+      .catch((error) =>
+        toast.error("Unable to load classes", {
+          description:
+            error instanceof Error ? error.message : "Check the classes API.",
+        }),
+      );
+  }, []);
+
+  const loadStudents = async (targetPage = page, searchTerm = search) => {
+    setLoading(true);
+    try {
+      const result = await listStudents({
+        page: targetPage,
+        limit: 10,
+        search: searchTerm,
+      });
+      setStudents(result.data ?? []);
+      setTotalPages(result.pagination?.totalPages ?? 1);
+      setCount(result.count ?? 0);
+    } catch (error) {
+      setStudents([]);
+      toast.error("Unable to load students", {
+        description:
+          error instanceof Error ? error.message : "Check the students API.",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const filteredStudents = mockStudentsFull.filter(
-    (student) =>
-      student.name.toLowerCase().includes(search.toLowerCase()) ||
-      student.id.toLowerCase().includes(search.toLowerCase()) ||
-      student.familyName.toLowerCase().includes(search.toLowerCase())
+  useEffect(() => {
+    loadStudents(page, search);
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [page]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      loadStudents(1, search);
+    }, 350);
+    return () => clearTimeout(timer);
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [search]);
+
+  const sectionsForClass = (classId: string, allClasses: ApiClass[]) => {
+    const match = allClasses.find((c) => String(c.class_id) === classId);
+    return match?.sections ?? [];
+  };
+
+  const addSections = useMemo(
+    () => sectionsForClass(addForm.classId, classes),
+    [addForm.classId, classes],
   );
+  const editSections = useMemo(
+    () => sectionsForClass(editForm.classId, classes),
+    [editForm.classId, classes],
+  );
+
+  const buildPayload = (form: StudentFormState): StudentUpdatePayload => ({
+    student_name: form.studentName.trim(),
+    family_id: Number(form.familyId),
+    mother_name: form.motherName.trim() || undefined,
+    date_of_birth: form.dateOfBirth || undefined,
+    gender: form.gender || undefined,
+    class_id: form.classId ? Number(form.classId) : undefined,
+    section_id: form.sectionId ? Number(form.sectionId) : undefined,
+    roll_number: form.rollNumber.trim() || undefined,
+    admission_date: form.admissionDate || undefined,
+    contact: form.contact.trim() || undefined,
+    address: form.address.trim() || undefined,
+    academic_session_id: form.academicSessionId
+      ? Number(form.academicSessionId)
+      : undefined,
+    status: form.status,
+  });
+
+  const handleAddSubmit = async () => {
+    if (
+      !addForm.admissionNumber.trim() ||
+      !addForm.studentName.trim() ||
+      !addForm.familyId
+    ) {
+      toast.error("Admission number, student name, and family are required.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload: StudentPayload = {
+        admission_number: addForm.admissionNumber.trim(),
+        ...buildPayload(addForm),
+      };
+      await createStudent(payload);
+      toast.success("Student added.");
+      setAddForm(emptyForm);
+      setAddOpen(false);
+      await loadStudents(1, search);
+      setPage(1);
+    } catch (error) {
+      toast.error("Failed to add student", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openEdit = (student: ApiStudentListItem) => {
+    setEditingId(student.id);
+    setEditForm({
+      admissionNumber: student.admission_number,
+      studentName: student.student_name,
+      familyId: String(student.family_id),
+      motherName: student.mother_name ?? "",
+      dateOfBirth: student.date_of_birth
+        ? student.date_of_birth.slice(0, 10)
+        : "",
+      gender: (student.gender as StudentGender) ?? "",
+      classId: student.class_id ? String(student.class_id) : "",
+      sectionId: student.section_id ? String(student.section_id) : "",
+      rollNumber: student.roll_number ?? "",
+      admissionDate: student.admission_date
+        ? student.admission_date.slice(0, 10)
+        : "",
+      contact: student.student_contact ?? "",
+      address: student.address ?? "",
+      academicSessionId: student.session_id ? String(student.session_id) : "1",
+      status: student.status,
+    });
+    setEditOpen(true);
+  };
+
+  const handleEditSubmit = async () => {
+    if (!editingId) return;
+    if (!editForm.studentName.trim() || !editForm.familyId) {
+      toast.error("Student name and family are required.");
+      return;
+    }
+    setUpdating(true);
+    try {
+      await updateStudent(editingId, buildPayload(editForm));
+      toast.success("Student updated.");
+      setEditOpen(false);
+      await loadStudents(page, search);
+    } catch (error) {
+      toast.error("Failed to update student", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleDelete = async (student: ApiStudentListItem) => {
+    if (
+      !window.confirm(
+        `Delete ${student.student_name} (${student.admission_number})?`,
+      )
+    )
+      return;
+    try {
+      await deleteStudent(student.id);
+      toast.success("Student deleted.");
+      await loadStudents(page, search);
+    } catch (error) {
+      toast.error("Failed to delete student", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -61,12 +313,10 @@ export default function StudentsPage() {
           </p>
         </div>
 
-        {/* Yahan dono buttons ko ek flex container mein daal diya hai */}
         <div className="flex items-center gap-2">
           <ImportModal />
-          
-          {/* Add Student Dialog Popup */}
-          <Dialog>
+
+          <Dialog open={addOpen} onOpenChange={setAddOpen}>
             <DialogTrigger className="inline-flex items-center justify-center rounded-md text-sm font-medium bg-slate-900 text-slate-50 hover:bg-slate-900/90 h-10 px-4 py-2">
               + Add Student
             </DialogTrigger>
@@ -79,151 +329,494 @@ export default function StudentsPage() {
               </DialogHeader>
               <div className="grid gap-4 py-4 md:grid-cols-2">
                 <div className="grid gap-2 md:col-span-2">
-                  <Label htmlFor="studentId">Student ID</Label>
-                  <Input id="studentId" placeholder="e.g. STD-005" />
+                  <Label htmlFor="admissionNumber">Admission Number</Label>
+                  <Input
+                    id="admissionNumber"
+                    placeholder="e.g. STD-005"
+                    value={addForm.admissionNumber}
+                    onChange={(e) =>
+                      setAddForm((f) => ({
+                        ...f,
+                        admissionNumber: e.target.value,
+                      }))
+                    }
+                  />
                 </div>
 
                 <div className="grid gap-2 md:col-span-2">
                   <Label htmlFor="name">Student Name</Label>
-                  <Input id="name" placeholder="Student Name" />
+                  <Input
+                    id="name"
+                    placeholder="Student Name"
+                    value={addForm.studentName}
+                    onChange={(e) =>
+                      setAddForm((f) => ({ ...f, studentName: e.target.value }))
+                    }
+                  />
                 </div>
 
                 <div className="grid gap-2 md:col-span-2">
                   <Label htmlFor="family">Parent / Family</Label>
-                  <Select>
+                  <Select
+                    value={addForm.familyId}
+                    onValueChange={(value) =>
+                      setAddForm((f) => ({ ...f, familyId: value }))
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select family..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="FAM-0001">Muhammad Arshad (FAM-0001)</SelectItem>
-                      <SelectItem value="FAM-0002">Imran Khan (FAM-0002)</SelectItem>
-                      <SelectItem value="FAM-0003">Tariq Mehmood (FAM-0003)</SelectItem>
-                      <SelectItem value="FAM-0004">Kamran Ali (FAM-0004)</SelectItem>
+                      {families.map((fam) => (
+                        <SelectItem key={fam.id} value={String(fam.id)}>
+                          {familyLabel(fam)}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="grid gap-2">
                   <Label htmlFor="mother">Mother</Label>
-                  <Input id="mother" placeholder="Mother name" />
+                  <Input
+                    id="mother"
+                    placeholder="Mother name"
+                    value={addForm.motherName}
+                    onChange={(e) =>
+                      setAddForm((f) => ({ ...f, motherName: e.target.value }))
+                    }
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="dob">Date of Birth</Label>
+                  <Input
+                    id="dob"
+                    type="date"
+                    value={addForm.dateOfBirth}
+                    onChange={(e) =>
+                      setAddForm((f) => ({ ...f, dateOfBirth: e.target.value }))
+                    }
+                  />
                 </div>
 
                 <div className="grid gap-2">
                   <Label htmlFor="gender">Gender</Label>
-                  <Select>
+                  <Select
+                    value={addForm.gender}
+                    onValueChange={(value) =>
+                      setAddForm((f) => ({
+                        ...f,
+                        gender: value as StudentGender,
+                      }))
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select gender..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Male">Male</SelectItem>
-                      <SelectItem value="Female">Female</SelectItem>
+                      {GENDER_OPTIONS.map((g) => (
+                        <SelectItem key={g} value={g}>
+                          {g}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="grid gap-2">
                   <Label htmlFor="class">Class</Label>
-                  <Select>
+                  <Select
+                    value={addForm.classId}
+                    onValueChange={(value) =>
+                      setAddForm((f) => ({
+                        ...f,
+                        classId: value,
+                        sectionId: "",
+                      }))
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select class..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Class 1">Class 1</SelectItem>
-                      <SelectItem value="Class 2">Class 2</SelectItem>
-                      <SelectItem value="Class 3">Class 3</SelectItem>
-                      <SelectItem value="Class 8">Class 8</SelectItem>
+                      {classes.map((c) => (
+                        <SelectItem key={c.class_id} value={String(c.class_id)}>
+                          {c.class_name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="grid gap-2">
                   <Label htmlFor="section">Section</Label>
-                  <Select>
+                  <Select
+                    value={addForm.sectionId}
+                    onValueChange={(value) =>
+                      setAddForm((f) => ({ ...f, sectionId: value }))
+                    }
+                    disabled={!addForm.classId}
+                  >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select section..." />
+                      <SelectValue
+                        placeholder={
+                          addForm.classId
+                            ? "Select section..."
+                            : "Pick a class first"
+                        }
+                      />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="A">Section A</SelectItem>
-                      <SelectItem value="B">Section B</SelectItem>
-                      <SelectItem value="C">Section C</SelectItem>
+                      {addSections.map((s) => (
+                        <SelectItem key={s.id} value={String(s.id)}>
+                          Section {s.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="grid gap-2">
                   <Label htmlFor="rollNumber">Roll Number</Label>
-                  <Input id="rollNumber" placeholder="e.g. 07" />
+                  <Input
+                    id="rollNumber"
+                    placeholder="e.g. 07"
+                    value={addForm.rollNumber}
+                    onChange={(e) =>
+                      setAddForm((f) => ({ ...f, rollNumber: e.target.value }))
+                    }
+                  />
                 </div>
 
                 <div className="grid gap-2">
                   <Label htmlFor="admissionDate">Admission Date</Label>
-                  <Input id="admissionDate" type="date" />
+                  <Input
+                    id="admissionDate"
+                    type="date"
+                    value={addForm.admissionDate}
+                    onChange={(e) =>
+                      setAddForm((f) => ({
+                        ...f,
+                        admissionDate: e.target.value,
+                      }))
+                    }
+                  />
                 </div>
 
                 <div className="grid gap-2">
                   <Label htmlFor="contact">Contact</Label>
-                  <Input id="contact" placeholder="03XX-XXXXXXX" />
+                  <Input
+                    id="contact"
+                    placeholder="03XX-XXXXXXX"
+                    value={addForm.contact}
+                    onChange={(e) =>
+                      setAddForm((f) => ({ ...f, contact: e.target.value }))
+                    }
+                  />
                 </div>
 
                 <div className="grid gap-2">
                   <Label htmlFor="status">Status</Label>
-                  <Select defaultValue="Active">
+                  <Select
+                    value={addForm.status}
+                    onValueChange={(value) =>
+                      setAddForm((f) => ({
+                        ...f,
+                        status: value as StudentStatus,
+                      }))
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select status..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Active">Active</SelectItem>
-                      <SelectItem value="Inactive">Inactive</SelectItem>
-                      <SelectItem value="Suspended">Suspended</SelectItem>
-                                            <SelectItem value="Suspended">Withdrawn</SelectItem>
-                      <SelectItem value="Graduated">Graduated</SelectItem>
-
+                      {STATUS_OPTIONS.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="grid gap-2 md:col-span-2">
                   <Label htmlFor="address">Address</Label>
-                  <Input id="address" placeholder="Street / Area / City" />
+                  <Input
+                    id="address"
+                    placeholder="Street / Area / City"
+                    value={addForm.address}
+                    onChange={(e) =>
+                      setAddForm((f) => ({ ...f, address: e.target.value }))
+                    }
+                  />
                 </div>
 
                 <div className="grid gap-2 md:col-span-2">
-                  <Label htmlFor="session">Academic Session</Label>
-                  <Select>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select session..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="2026-2027">2026-2027</SelectItem>
-                      <SelectItem value="2025-2026">2025-2026</SelectItem>
-                      <SelectItem value="2024-2025">2024-2025</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="grid gap-2 md:col-span-2">
-                  <Label htmlFor="fee">Monthly Fee</Label>
-                  <Input id="fee" type="number" placeholder="e.g. 4000" />
+                  <Label htmlFor="session">
+                    Academic Session ID
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">
+                      (no session picker wired yet — enter the ID directly)
+                    </span>
+                  </Label>
+                  <Input
+                    id="session"
+                    type="number"
+                    value={addForm.academicSessionId}
+                    onChange={(e) =>
+                      setAddForm((f) => ({
+                        ...f,
+                        academicSessionId: e.target.value,
+                      }))
+                    }
+                  />
                 </div>
               </div>
 
               <div className="flex justify-end">
-                <DialogClose
-                  onClick={handleSaveStudent}
-                  className="inline-flex items-center justify-center rounded-md text-sm font-medium bg-slate-900 text-white hover:bg-slate-800 h-10 px-4 py-2"
-                >
-                  Save Student
-                </DialogClose>
+                <Button onClick={handleAddSubmit} disabled={saving}>
+                  {saving ? "Saving..." : "Save Student"}
+                </Button>
               </div>
             </DialogContent>
           </Dialog>
         </div>
       </div>
 
+      {/* Edit Student Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-140 max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Update Student</DialogTitle>
+            <DialogDescription>
+              Edit student details. Admission number can't be changed here.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4 md:grid-cols-2">
+            <div className="grid gap-2 md:col-span-2">
+              <Label>Admission Number</Label>
+              <Input value={editForm.admissionNumber} disabled />
+            </div>
+
+            <div className="grid gap-2 md:col-span-2">
+              <Label htmlFor="editName">Student Name</Label>
+              <Input
+                id="editName"
+                value={editForm.studentName}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, studentName: e.target.value }))
+                }
+              />
+            </div>
+
+            <div className="grid gap-2 md:col-span-2">
+              <Label htmlFor="editFamily">Parent / Family</Label>
+              <Select
+                value={editForm.familyId}
+                onValueChange={(value) =>
+                  setEditForm((f) => ({ ...f, familyId: value }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select family..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {families.map((fam) => (
+                    <SelectItem key={fam.id} value={String(fam.id)}>
+                      {familyLabel(fam)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="editMother">Mother</Label>
+              <Input
+                id="editMother"
+                value={editForm.motherName}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, motherName: e.target.value }))
+                }
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="editDob">Date of Birth</Label>
+              <Input
+                id="editDob"
+                type="date"
+                value={editForm.dateOfBirth}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, dateOfBirth: e.target.value }))
+                }
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="editGender">Gender</Label>
+              <Select
+                value={editForm.gender}
+                onValueChange={(value) =>
+                  setEditForm((f) => ({ ...f, gender: value as StudentGender }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select gender..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {GENDER_OPTIONS.map((g) => (
+                    <SelectItem key={g} value={g}>
+                      {g}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="editClass">Class</Label>
+              <Select
+                value={editForm.classId}
+                onValueChange={(value) =>
+                  setEditForm((f) => ({ ...f, classId: value, sectionId: "" }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select class..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {classes.map((c) => (
+                    <SelectItem key={c.class_id} value={String(c.class_id)}>
+                      {c.class_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="editSection">Section</Label>
+              <Select
+                value={editForm.sectionId}
+                onValueChange={(value) =>
+                  setEditForm((f) => ({ ...f, sectionId: value }))
+                }
+                disabled={!editForm.classId}
+              >
+                <SelectTrigger>
+                  <SelectValue
+                    placeholder={
+                      editForm.classId
+                        ? "Select section..."
+                        : "Pick a class first"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {editSections.map((s) => (
+                    <SelectItem key={s.id} value={String(s.id)}>
+                      Section {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="editRoll">Roll Number</Label>
+              <Input
+                id="editRoll"
+                value={editForm.rollNumber}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, rollNumber: e.target.value }))
+                }
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="editAdmissionDate">Admission Date</Label>
+              <Input
+                id="editAdmissionDate"
+                type="date"
+                value={editForm.admissionDate}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, admissionDate: e.target.value }))
+                }
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="editContact">Contact</Label>
+              <Input
+                id="editContact"
+                value={editForm.contact}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, contact: e.target.value }))
+                }
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="editStatus">Status</Label>
+              <Select
+                value={editForm.status}
+                onValueChange={(value) =>
+                  setEditForm((f) => ({ ...f, status: value as StudentStatus }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select status..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-2 md:col-span-2">
+              <Label htmlFor="editAddress">Address</Label>
+              <Input
+                id="editAddress"
+                value={editForm.address}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, address: e.target.value }))
+                }
+              />
+            </div>
+
+            <div className="grid gap-2 md:col-span-2">
+              <Label htmlFor="editSession">Academic Session ID</Label>
+              <Input
+                id="editSession"
+                type="number"
+                value={editForm.academicSessionId}
+                onChange={(e) =>
+                  setEditForm((f) => ({
+                    ...f,
+                    academicSessionId: e.target.value,
+                  }))
+                }
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <Button onClick={handleEditSubmit} disabled={updating}>
+              {updating ? "Saving..." : "Update Student"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Students Table */}
       <Card>
         <CardHeader>
-          <CardTitle>All Students ({filteredStudents.length})</CardTitle>
+          <CardTitle>All Students ({count})</CardTitle>
           <Input
             placeholder="Search by student name, ID or family..."
             value={search}
@@ -235,53 +828,113 @@ export default function StudentsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Student ID</TableHead>
+                <TableHead>Admission #</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Family / Parent</TableHead>
                 <TableHead>Class</TableHead>
                 <TableHead>Section</TableHead>
-                <TableHead>Monthly Fee</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredStudents.map((student) => (
-                <TableRow
-                  key={student.id}
-                  onClick={() => router.push(`/students/${student.id}`)}
-                  className="cursor-pointer hover:bg-muted/50"
-                >
-                  <TableCell className="font-medium">{student.id}</TableCell>
-                  <TableCell>{student.name}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {student.familyName} ({student.familyId})
-                  </TableCell>
-                  <TableCell>{student.className}</TableCell>
-                  <TableCell>{student.section}</TableCell>
-                  <TableCell>Rs. {student.monthlyFee.toLocaleString()}</TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={
-                        student.status === "Active"
-                          ? "default"
-                          : student.status === "Suspended"
-                            ? "destructive"
-                            : student.status === "Inactive"
-                              ? "destructive"
-                              : student.status === "Withdrawn"
-                              ? "destructive"
-                              : student.status === "Graduated"
-                                ? "secondary"
-                                : "secondary"
-                      }
-                    >
-                      {student.status}
-                    </Badge>
+              {loading ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={7}
+                    className="py-8 text-center text-muted-foreground"
+                  >
+                    Loading students...
                   </TableCell>
                 </TableRow>
-              ))}
+              ) : students.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={7}
+                    className="py-8 text-center text-muted-foreground"
+                  >
+                    No students found.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                students.map((student) => (
+                  <TableRow
+                    key={student.id}
+                    onClick={() => router.push(`/students/${student.id}`)}
+                    className="cursor-pointer hover:bg-muted/50"
+                  >
+                    <TableCell className="font-medium">
+                      {student.admission_number}
+                    </TableCell>
+                    <TableCell>{student.student_name}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {student.father_parent_name} ({student.family_id_code})
+                    </TableCell>
+                    <TableCell>{student.class_name ?? "—"}</TableCell>
+                    <TableCell>{student.section_name ?? "—"}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={
+                          student.status === "Active"
+                            ? "default"
+                            : student.status === "Graduated"
+                              ? "secondary"
+                              : "destructive"
+                        }
+                      >
+                        {student.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openEdit(student)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" /> Edit
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => handleDelete(student)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" /> Delete
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
+          <div className="mt-4 flex items-center justify-between border-t pt-4 text-sm text-muted-foreground">
+            <span>
+              Page {page} of {totalPages}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page === 1 || loading}
+                onClick={() => setPage((value) => Math.max(1, value - 1))}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page === totalPages || loading}
+                onClick={() =>
+                  setPage((value) => Math.min(totalPages, value + 1))
+                }
+              >
+                Next
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>
