@@ -22,7 +22,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-  DialogClose,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import {
@@ -47,6 +46,10 @@ import {
 } from "@/lib/api/students";
 import { listClasses, type ApiClass } from "@/lib/api/classes";
 import { listFamilies } from "@/lib/api/families";
+import {
+  getAcademicSessions,
+  type AcademicSession,
+} from "@/lib/api/academic-sessions";
 import type { ApiFamily } from "@/lib/family-adapters";
 
 const STATUS_OPTIONS: StudentStatus[] = [
@@ -62,7 +65,7 @@ const GENDER_OPTIONS: StudentGender[] = ["Male", "Female", "Other"];
 type StudentFormState = {
   admissionNumber: string;
   studentName: string;
-  familyId: string; // Select values are strings; parsed to number on submit
+  familyId: string;
   motherName: string;
   dateOfBirth: string;
   gender: StudentGender | "";
@@ -89,7 +92,7 @@ const emptyForm: StudentFormState = {
   admissionDate: "",
   contact: "",
   address: "",
-  academicSessionId: "1",
+  academicSessionId: "",
   status: "Active",
 };
 
@@ -108,6 +111,7 @@ export default function StudentsPage() {
 
   const [families, setFamilies] = useState<ApiFamily[]>([]);
   const [classes, setClasses] = useState<ApiClass[]>([]);
+  const [sessions, setSessions] = useState<AcademicSession[]>([]);
 
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState<StudentFormState>(emptyForm);
@@ -118,9 +122,6 @@ export default function StudentsPage() {
   const [editForm, setEditForm] = useState<StudentFormState>(emptyForm);
   const [updating, setUpdating] = useState(false);
 
-  // Reference data — families and classes rarely change mid-session, so
-  // load once. (Classes list is capped at 100; raise the limit if you
-  // expect more.)
   useEffect(() => {
     listFamilies(1, 100)
       .then((result) => setFamilies(result.data ?? []))
@@ -139,6 +140,21 @@ export default function StudentsPage() {
             error instanceof Error ? error.message : "Check the classes API.",
         }),
       );
+
+    getAcademicSessions()
+      .then((sessionsData) => {
+        setSessions(sessionsData || []);
+        const active = sessionsData?.find((s) => s.is_active);
+        if (active) {
+          setAddForm((prev) => ({
+            ...prev,
+            academicSessionId: String(active.id),
+          }));
+        }
+      })
+      .catch(() => {
+        // Non-fatal if session lookup fails
+      });
   }, []);
 
   const loadStudents = async (targetPage = page, searchTerm = search) => {
@@ -191,6 +207,31 @@ export default function StudentsPage() {
     [editForm.classId, classes],
   );
 
+  const getFamilyDisplay = (id: string) => {
+    const found = families.find((f) => String(f.id) === id);
+    return found ? familyLabel(found) : undefined;
+  };
+
+  const getClassDisplay = (id: string) => {
+    const found = classes.find((c) => String(c.class_id) === id);
+    return found ? found.class_name : undefined;
+  };
+
+  const getSectionDisplay = (
+    sectionId: string,
+    sectionList: Array<{ id: number; name: string }>,
+  ) => {
+    const found = sectionList.find((s) => String(s.id) === sectionId);
+    return found ? `Section ${found.name}` : undefined;
+  };
+
+  const getSessionDisplay = (id: string) => {
+    const found = sessions.find((s) => String(s.id) === id);
+    return found
+      ? `${found.name} ${found.is_active ? "(Active)" : ""}`
+      : undefined;
+  };
+
   const buildPayload = (form: StudentFormState): StudentUpdatePayload => ({
     student_name: form.studentName.trim(),
     family_id: Number(form.familyId),
@@ -226,7 +267,12 @@ export default function StudentsPage() {
       };
       await createStudent(payload);
       toast.success("Student added.");
-      setAddForm(emptyForm);
+
+      const active = sessions.find((s) => s.is_active);
+      setAddForm({
+        ...emptyForm,
+        academicSessionId: active ? String(active.id) : "",
+      });
       setAddOpen(false);
       await loadStudents(1, search);
       setPage(1);
@@ -258,7 +304,7 @@ export default function StudentsPage() {
         : "",
       contact: student.student_contact ?? "",
       address: student.address ?? "",
-      academicSessionId: student.session_id ? String(student.session_id) : "1",
+      academicSessionId: student.session_id ? String(student.session_id) : "",
       status: student.status,
     });
     setEditOpen(true);
@@ -364,7 +410,9 @@ export default function StudentsPage() {
                     }
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select family..." />
+                      <SelectValue placeholder="Select family...">
+                        {getFamilyDisplay(addForm.familyId)}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {families.map((fam) => (
@@ -412,7 +460,9 @@ export default function StudentsPage() {
                     }
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select gender..." />
+                      <SelectValue placeholder="Select gender...">
+                        {addForm.gender || undefined}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {GENDER_OPTIONS.map((g) => (
@@ -437,7 +487,9 @@ export default function StudentsPage() {
                     }
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select class..." />
+                      <SelectValue placeholder="Select class...">
+                        {getClassDisplay(addForm.classId)}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {classes.map((c) => (
@@ -465,7 +517,9 @@ export default function StudentsPage() {
                             ? "Select section..."
                             : "Pick a class first"
                         }
-                      />
+                      >
+                        {getSectionDisplay(addForm.sectionId, addSections)}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {addSections.map((s) => (
@@ -528,7 +582,9 @@ export default function StudentsPage() {
                     }
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Select status..." />
+                      <SelectValue placeholder="Select status...">
+                        {addForm.status}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {STATUS_OPTIONS.map((s) => (
@@ -553,23 +609,29 @@ export default function StudentsPage() {
                 </div>
 
                 <div className="grid gap-2 md:col-span-2">
-                  <Label htmlFor="session">
-                    Academic Session ID
-                    <span className="ml-1 text-xs font-normal text-muted-foreground">
-                      (no session picker wired yet — enter the ID directly)
-                    </span>
-                  </Label>
-                  <Input
-                    id="session"
-                    type="number"
+                  <Label htmlFor="session">Academic Session</Label>
+                  <Select
                     value={addForm.academicSessionId}
-                    onChange={(e) =>
+                    onValueChange={(value) =>
                       setAddForm((f) => ({
                         ...f,
-                        academicSessionId: e.target.value,
+                        academicSessionId: value ?? "",
                       }))
                     }
-                  />
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select session...">
+                        {getSessionDisplay(addForm.academicSessionId)}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sessions.map((sess) => (
+                        <SelectItem key={sess.id} value={String(sess.id)}>
+                          {sess.name} {sess.is_active ? "(Active)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
@@ -618,7 +680,9 @@ export default function StudentsPage() {
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select family..." />
+                  <SelectValue placeholder="Select family...">
+                    {getFamilyDisplay(editForm.familyId)}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {families.map((fam) => (
@@ -658,11 +722,16 @@ export default function StudentsPage() {
               <Select
                 value={editForm.gender}
                 onValueChange={(value) =>
-                  setEditForm((f) => ({ ...f, gender: value as StudentGender }))
+                  setEditForm((f) => ({
+                    ...f,
+                    gender: value as StudentGender,
+                  }))
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select gender..." />
+                  <SelectValue placeholder="Select gender...">
+                    {editForm.gender || undefined}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {GENDER_OPTIONS.map((g) => (
@@ -679,11 +748,17 @@ export default function StudentsPage() {
               <Select
                 value={editForm.classId}
                 onValueChange={(value) =>
-                  setEditForm((f) => ({ ...f, classId: value ?? "", sectionId: "" }))
+                  setEditForm((f) => ({
+                    ...f,
+                    classId: value ?? "",
+                    sectionId: "",
+                  }))
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select class..." />
+                  <SelectValue placeholder="Select class...">
+                    {getClassDisplay(editForm.classId)}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {classes.map((c) => (
@@ -711,7 +786,9 @@ export default function StudentsPage() {
                         ? "Select section..."
                         : "Pick a class first"
                     }
-                  />
+                  >
+                    {getSectionDisplay(editForm.sectionId, editSections)}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {editSections.map((s) => (
@@ -741,7 +818,10 @@ export default function StudentsPage() {
                 type="date"
                 value={editForm.admissionDate}
                 onChange={(e) =>
-                  setEditForm((f) => ({ ...f, admissionDate: e.target.value }))
+                  setEditForm((f) => ({
+                    ...f,
+                    admissionDate: e.target.value,
+                  }))
                 }
               />
             </div>
@@ -762,11 +842,16 @@ export default function StudentsPage() {
               <Select
                 value={editForm.status}
                 onValueChange={(value) =>
-                  setEditForm((f) => ({ ...f, status: value as StudentStatus }))
+                  setEditForm((f) => ({
+                    ...f,
+                    status: value as StudentStatus,
+                  }))
                 }
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select status..." />
+                  <SelectValue placeholder="Select status...">
+                    {editForm.status}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {STATUS_OPTIONS.map((s) => (
@@ -790,18 +875,29 @@ export default function StudentsPage() {
             </div>
 
             <div className="grid gap-2 md:col-span-2">
-              <Label htmlFor="editSession">Academic Session ID</Label>
-              <Input
-                id="editSession"
-                type="number"
+              <Label htmlFor="editSession">Academic Session</Label>
+              <Select
                 value={editForm.academicSessionId}
-                onChange={(e) =>
+                onValueChange={(value) =>
                   setEditForm((f) => ({
                     ...f,
-                    academicSessionId: e.target.value,
+                    academicSessionId: value ?? "",
                   }))
                 }
-              />
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select session...">
+                    {getSessionDisplay(editForm.academicSessionId)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {sessions.map((sess) => (
+                    <SelectItem key={sess.id} value={String(sess.id)}>
+                      {sess.name} {sess.is_active ? "(Active)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 

@@ -34,19 +34,16 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await fetch(
-        "http://192.168.1.8:8000/api/auth/login",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            email,
-            password,
-          }),
-        }
-      );
+      const response = await fetch("http://localhost:8000/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          password,
+        }),
+      });
 
       const data = await response.json();
       console.log("Login response:", data);
@@ -83,7 +80,7 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <Card className="w-[400px]">
+      <Card className="w-100">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-3">
             <School size={40} />
@@ -91,9 +88,7 @@ export default function LoginPage() {
 
           <CardTitle>SKYLARKS Admin Portal</CardTitle>
 
-          <CardDescription>
-            Login to access the admin portal
-          </CardDescription>
+          <CardDescription>Login to access the admin portal</CardDescription>
         </CardHeader>
 
         <form onSubmit={handleLogin}>
@@ -124,11 +119,7 @@ export default function LoginPage() {
           </CardContent>
 
           <CardFooter>
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={loading}
-            >
+            <Button type="submit" className="w-full" disabled={loading}>
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
