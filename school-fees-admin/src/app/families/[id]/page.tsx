@@ -335,6 +335,16 @@ export default function FamilyDetailsPage() {
         </CardContent>
       </Card>
 
+      {family.scholarshipInfo && (
+  <Card>
+    <CardHeader>
+      <CardTitle>Scholarship Information</CardTitle>
+    </CardHeader>
+    <CardContent>
+      <p className="text-sm text-muted-foreground">{family.scholarshipInfo}</p>
+    </CardContent>
+  </Card>
+)}
       {/* Payment History Table */}
       <Card>
         <CardHeader>

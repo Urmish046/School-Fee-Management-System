@@ -21,13 +21,41 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useState } from "react";
-import { mockFamilies } from "@/lib/mock-data";
+import { mockFamilies, Family } from "@/lib/mock-data";
+import { mockConcessions, Concession } from "@/lib/mock-concessions";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
+const emptyForm = {
+  fatherName: "",
+  motherName: "",
+  cnic: "",
+  admissionDate: "",
+  contact: "",
+  motherContact: "",
+  whatsapp: "",
+  email: "",
+  emergencyContact: "",
+  address: "",
+  notes: "",
+  status: "Active" as "Active" | "Inactive",
+  scholarshipInfo: "",
+  concessionType: "" as "" | "Fixed" | "Percentage",
+  concessionValue: "",
+  concessionReason: "",
+};
+
 export default function FamiliesPage() {
   const [search, setSearch] = useState("");
+  const [form, setForm] = useState(emptyForm);
   const router = useRouter();
 
   const filteredFamilies = mockFamilies.filter((family) =>
@@ -37,11 +65,60 @@ export default function FamiliesPage() {
   );
 
   const nextFamilyId = `FAM-${String(mockFamilies.length + 1).padStart(4, "0")}`;
+  const nextInternalId = String(mockFamilies.length + 1);
+
+  const updateField = (field: keyof typeof form, value: string) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  };
 
   const handleSaveFamily = () => {
+    if (!form.fatherName.trim()) {
+      toast.error("Father / Parent Name is required.");
+      return;
+    }
+
+    const newFamily: Family = {
+      id: nextInternalId,
+      familyId: nextFamilyId,
+      fatherName: form.fatherName,
+      motherName: form.motherName,
+      cnic: form.cnic,
+      contact: form.contact,
+      motherContact: form.motherContact,
+      whatsapp: form.whatsapp,
+      email: form.email,
+      address: form.address,
+      emergencyContact: form.emergencyContact,
+      notes: form.notes,
+      admissionDate: form.admissionDate,
+      scholarshipInfo: form.scholarshipInfo,
+      totalChildren: 0,
+      balance: 0,
+      status: form.status,
+      paymentStatus: "Unpaid",
+    };
+
+    mockFamilies.push(newFamily);
+
+    if (form.concessionType && form.concessionValue) {
+      const newConcession: Concession = {
+        id: `CON-${String(mockConcessions.length + 1).padStart(3, "0")}`,
+        appliesTo: "Family",
+        targetName: form.fatherName,
+        targetId: nextFamilyId,
+        type: form.concessionType,
+        value: Number(form.concessionValue) || 0,
+        reason: form.concessionReason || "Family Concession",
+        status: "Active",
+      };
+      mockConcessions.push(newConcession);
+    }
+
     toast.success("Family added!", {
       description: `${nextFamilyId} has been created and is ready for student enrollment.`,
     });
+
+    setForm(emptyForm);
   };
 
   return (
@@ -70,57 +147,168 @@ export default function FamiliesPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
               <div className="space-y-1.5">
                 <Label htmlFor="fatherName">Father / Parent Name</Label>
-                <Input id="fatherName" placeholder="e.g. Muhammad Arshad" />
+                <Input
+                  id="fatherName"
+                  placeholder="e.g. Muhammad Arshad"
+                  value={form.fatherName}
+                  onChange={(e) => updateField("fatherName", e.target.value)}
+                />
               </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="motherName">Mother Name</Label>
-                <Input id="motherName" placeholder="e.g. Sadia Arshad" />
+                <Input
+                  id="motherName"
+                  placeholder="e.g. Sadia Arshad"
+                  value={form.motherName}
+                  onChange={(e) => updateField("motherName", e.target.value)}
+                />
               </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="cnic">CNIC</Label>
-                <Input id="cnic" placeholder="11111-1111111-1" />
+                <Input
+                  id="cnic"
+                  placeholder="11111-1111111-1"
+                  value={form.cnic}
+                  onChange={(e) => updateField("cnic", e.target.value)}
+                />
               </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="admissionDate">Admission Date</Label>
-                <Input id="admissionDate" type="date" />
+                <Input
+                  id="admissionDate"
+                  type="date"
+                  value={form.admissionDate}
+                  onChange={(e) => updateField("admissionDate", e.target.value)}
+                />
               </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="fatherContact">Father Contact</Label>
-                <Input id="fatherContact" placeholder="0300-1234567" />
+                <Input
+                  id="fatherContact"
+                  placeholder="0300-1234567"
+                  value={form.contact}
+                  onChange={(e) => updateField("contact", e.target.value)}
+                />
               </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="motherContact">Mother Contact</Label>
-                <Input id="motherContact" placeholder="0300-7654321" />
+                <Input
+                  id="motherContact"
+                  placeholder="0300-7654321"
+                  value={form.motherContact}
+                  onChange={(e) => updateField("motherContact", e.target.value)}
+                />
               </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="whatsapp">WhatsApp Number</Label>
-                <Input id="whatsapp" placeholder="0300-1234567" />
+                <Input
+                  id="whatsapp"
+                  placeholder="0300-1234567"
+                  value={form.whatsapp}
+                  onChange={(e) => updateField("whatsapp", e.target.value)}
+                />
               </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" placeholder="family@email.com" />
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="family@email.com"
+                  value={form.email}
+                  onChange={(e) => updateField("email", e.target.value)}
+                />
               </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="emergencyContact">Emergency Contact</Label>
-                <Input id="emergencyContact" placeholder="0300-1112223" />
+                <Input
+                  id="emergencyContact"
+                  placeholder="0300-1112223"
+                  value={form.emergencyContact}
+                  onChange={(e) => updateField("emergencyContact", e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="status">Active/Inactive Status</Label>
+                <Select
+                  value={form.status}
+                  onValueChange={(v) => updateField("status", v ?? "")}
+                >
+                  <SelectTrigger id="status">
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Active">Active</SelectItem>
+                    <SelectItem value="Inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-1.5 sm:col-span-2">
                 <Label htmlFor="address">Address</Label>
-                <Input id="address" placeholder="House #, Street, City" />
+                <Input
+                  id="address"
+                  placeholder="House #, Street, City"
+                  value={form.address}
+                  onChange={(e) => updateField("address", e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="scholarshipInfo">Scholarship Information</Label>
+                <Input
+                  id="scholarshipInfo"
+                  placeholder="e.g. Merit scholarship, 20% tuition waiver"
+                  value={form.scholarshipInfo}
+                  onChange={(e) => updateField("scholarshipInfo", e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-1.5 sm:col-span-2 border rounded-md p-3">
+                <Label className="mb-1 block">Family Concession (optional)</Label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <Select
+                    value={form.concessionType}
+                    onValueChange={(v) => updateField("concessionType", v ?? "")}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Percentage">Percentage</SelectItem>
+                      <SelectItem value="Fixed">Fixed Amount</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="number"
+                    placeholder={form.concessionType === "Percentage" ? "e.g. 10" : "e.g. 1000"}
+                    value={form.concessionValue}
+                    onChange={(e) => updateField("concessionValue", e.target.value)}
+                  />
+                  <Input
+                    placeholder="Reason (e.g. Sibling discount)"
+                    value={form.concessionReason}
+                    onChange={(e) => updateField("concessionReason", e.target.value)}
+                  />
+                </div>
               </div>
 
               <div className="space-y-1.5 sm:col-span-2">
                 <Label htmlFor="notes">Notes</Label>
-                <Input id="notes" placeholder="Optional notes about this family..." />
+                <Input
+                  id="notes"
+                  placeholder="Optional notes about this family..."
+                  value={form.notes}
+                  onChange={(e) => updateField("notes", e.target.value)}
+                />
               </div>
             </div>
 
