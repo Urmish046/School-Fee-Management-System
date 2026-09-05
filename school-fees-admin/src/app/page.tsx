@@ -3,12 +3,46 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
-import { mockFamilies } from "@/lib/mock-data";
+import { toast } from "sonner";
+import { getLedger } from "@/lib/api/ledger";
+import { listExpenses } from "@/lib/api/expenses";
+import { listStudents } from "@/lib/api/students";
+import { listFamilies } from "@/lib/api/families";
+import { listPayments } from "@/lib/api/payments";
+import { listInvoices } from "@/lib/api/invoices";
+
+// Extract clean YYYY-MM-DD from any string without timezone shifts
+function toDateStr(val: any): string {
+  if (!val) return "";
+  if (typeof val === "string") return val.substring(0, 10);
+  const d = new Date(val);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 export default function DashboardPage() {
   const router = useRouter();
   const [authenticated, setAuthenticated] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const [stats, setStats] = useState({
+    todaysCollection: 0,
+    monthCollection: 0,
+    currentExpenses: 0,
+    netIncome: 0,
+    totalOutstanding: 0,
+    totalArrears: 0,
+    monthTarget: 0,
+    collectedPct: 0,
+    totalFamilies: 0,
+    totalStudents: 0,
+    paidFamilies: 0,
+    partiallyPaidFamilies: 0,
+    unpaidFamilies: 0,
+  });
 
   useEffect(() => {
     const token = window.localStorage.getItem("accessToken");
@@ -21,52 +55,204 @@ export default function DashboardPage() {
     }
     setAuthenticated(true);
     setAuthChecked(true);
+
+    async function fetchDashboardData() {
+      try {
+        setLoading(true);
+
+        const now = new Date();
+        const todayStr = toDateStr(now);
+        const currentMonthStr = todayStr.substring(0, 7);
+
+        const [
+          ledgerRes,
+          expensesRes,
+          studentsRes,
+          familiesRes,
+          paymentsRes,
+          invoicesRes,
+        ] = await Promise.all([
+          getLedger().catch(() => null),
+          listExpenses({ limit: 500 }).catch(() => null),
+          listStudents({ limit: 500 }).catch(() => null),
+          listFamilies(500).catch(() => null),
+          listPayments({ limit: 500 }).catch(() => null),
+          listInvoices({ limit: 500 }).catch(() => null),
+        ]);
+
+        // 1. Today's & Month's Collection
+        const payments = paymentsRes?.data || [];
+        const todaysCollection = payments
+          .filter((p: any) => toDateStr(p.payment_date) === todayStr)
+          .reduce(
+            (sum: number, p: any) => sum + (Number(p.amount_paid) || 0),
+            0,
+          );
+
+        const monthCollection =
+          payments
+            .filter((p: any) =>
+              toDateStr(p.payment_date).startsWith(currentMonthStr),
+            )
+            .reduce(
+              (sum: number, p: any) => sum + (Number(p.amount_paid) || 0),
+              0,
+            ) || Number(ledgerRes?.summary?.total_income || 0);
+
+        // 2. Expenses
+        const expenses = expensesRes?.data || [];
+        const currentExpenses =
+          expenses
+            .filter((e: any) =>
+              toDateStr(e.expense_date).startsWith(currentMonthStr),
+            )
+            .reduce(
+              (sum: number, e: any) => sum + (Number(e.amount) || 0),
+              0,
+            ) || Number(expensesRes?.totalExpensesSum || 0);
+
+        const netIncome = monthCollection - currentExpenses;
+
+        // 3. Invoices & Dues
+        const invoices = invoicesRes?.data || [];
+        const totalOutstanding = invoices
+          .filter(
+            (inv: any) =>
+              inv.status !== "Paid" &&
+              inv.status !== "Cancelled" &&
+              inv.status !== "Waived",
+          )
+          .reduce(
+            (sum: number, inv: any) =>
+              sum +
+              (Number(inv.total_payable || 0) - Number(inv.paid_amount || 0)),
+            0,
+          );
+
+        const totalArrears = invoices
+          .filter(
+            (inv: any) =>
+              inv.billing_month < currentMonthStr &&
+              inv.status !== "Paid" &&
+              inv.status !== "Cancelled" &&
+              inv.status !== "Waived",
+          )
+          .reduce(
+            (sum: number, inv: any) =>
+              sum +
+              (Number(inv.total_payable || 0) - Number(inv.paid_amount || 0)),
+            0,
+          );
+
+        const currentMonthInvoices = invoices.filter(
+          (inv: any) => inv.billing_month === currentMonthStr,
+        );
+        const currentMonthBilled = currentMonthInvoices.reduce(
+          (sum: number, inv: any) => sum + Number(inv.total_payable || 0),
+          0,
+        );
+
+        const monthTarget =
+          currentMonthBilled > 0
+            ? currentMonthBilled
+            : monthCollection + totalOutstanding;
+        const collectedPct =
+          monthTarget > 0
+            ? Math.min(Math.round((monthCollection / monthTarget) * 100), 100)
+            : 0;
+
+        // 4. Enrollment & Breakdown
+        const totalStudents =
+          studentsRes?.pagination?.total || studentsRes?.data?.length || 0;
+        const totalFamilies = familiesRes?.data?.length || 0;
+
+        const paidFamilies = currentMonthInvoices.filter(
+          (inv: any) => inv.status === "Paid",
+        ).length;
+        const partiallyPaidFamilies = currentMonthInvoices.filter(
+          (inv: any) => inv.status === "Partially Paid",
+        ).length;
+        const unpaidFamilies = currentMonthInvoices.filter(
+          (inv: any) => inv.status === "Unpaid" || inv.status === "Overdue",
+        ).length;
+
+        setStats({
+          todaysCollection,
+          monthCollection,
+          currentExpenses,
+          netIncome,
+          totalOutstanding,
+          totalArrears,
+          monthTarget,
+          collectedPct,
+          totalFamilies,
+          totalStudents,
+          paidFamilies,
+          partiallyPaidFamilies,
+          unpaidFamilies,
+        });
+      } catch (error) {
+        toast.error("Failed to load dashboard metrics", {
+          description: error instanceof Error ? error.message : "Network error",
+        });
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchDashboardData();
   }, [router]);
 
   if (!authChecked || !authenticated) {
     return <div className="fixed inset-0 z-[9999] min-h-screen bg-[#f4f2ee]" />;
   }
 
-  const totalFamilies = mockFamilies.length;
-  const totalStudents = mockFamilies.reduce((sum, f) => sum + f.totalChildren, 0);
-  const totalOutstanding = mockFamilies.reduce((sum, f) => sum + f.balance, 0);
-  const paidFamilies = mockFamilies.filter((f) => f.paymentStatus === "Paid").length;
-  const partiallyPaidFamilies = mockFamilies.filter((f) => f.paymentStatus === "Partial").length;
-  const unpaidFamilies = mockFamilies.filter((f) => f.paymentStatus === "Unpaid").length;
-
-  const todaysCollection = 0;
-  const monthCollection = 45000;
-  const currentExpenses = 38000; // keep in sync with the Expenses page total
-  const netIncome = monthCollection - currentExpenses;
-  const monthTarget = monthCollection + totalOutstanding;
-  const collectedPct = monthTarget > 0 ? Math.round((monthCollection / monthTarget) * 100) : 0;
-
   const cashFlow = [
-    { label: "Current Month Collection", value: monthCollection, tone: "positive" as const },
-    { label: "Current Expenses", value: currentExpenses, tone: "negative" as const },
+    {
+      label: "Current Month Collection",
+      value: stats.monthCollection,
+      tone: "positive" as const,
+    },
+    {
+      label: "Current Expenses",
+      value: stats.currentExpenses,
+      tone: "negative" as const,
+    },
     {
       label: "Net Income",
-      value: netIncome,
-      tone: netIncome >= 0 ? ("positive" as const) : ("negative" as const),
+      value: stats.netIncome,
+      tone:
+        stats.netIncome >= 0 ? ("positive" as const) : ("negative" as const),
     },
-    { label: "Total Outstanding", value: totalOutstanding, tone: "negative" as const },
-    { label: "Total Arrears (Previous Months)", value: 0, tone: "neutral" as const },
+    {
+      label: "Total Outstanding",
+      value: stats.totalOutstanding,
+      tone: "negative" as const,
+    },
+    {
+      label: "Total Arrears (Previous Months)",
+      value: stats.totalArrears,
+      tone:
+        stats.totalArrears > 0 ? ("negative" as const) : ("neutral" as const),
+    },
   ];
 
   const enrollment = [
-    { label: "Total Families", value: totalFamilies },
-    { label: "Total Students", value: totalStudents },
-    { label: "Families Paid in Full", value: paidFamilies },
-    { label: "Families Partially Paid", value: partiallyPaidFamilies },
-    { label: "Families Unpaid", value: unpaidFamilies },
+    { label: "Total Families", value: stats.totalFamilies },
+    { label: "Total Students", value: stats.totalStudents },
+    { label: "Families Paid in Full", value: stats.paidFamilies },
+    { label: "Families Partially Paid", value: stats.partiallyPaidFamilies },
+    { label: "Families Unpaid / Overdue", value: stats.unpaidFamilies },
   ];
 
   return (
     <div className="space-y-5 p-5 lg:p-6">
       <div>
-        <h1 className="text-3xl font-semibold tracking-tight text-slate-900">Dashboard</h1>
+        <h1 className="text-3xl font-semibold tracking-tight text-slate-900">
+          Dashboard
+        </h1>
         <p className="mt-1 text-sm text-slate-500">
-          Overview of school fees and finances
+          Overview of school fees, active revenue, and financial health
         </p>
       </div>
 
@@ -78,29 +264,35 @@ export default function DashboardPage() {
                 Today&apos;s Collection
               </p>
               <p className="text-2xl font-bold tracking-tight text-slate-900 tabular-nums">
-                Rs. {todaysCollection.toLocaleString()}
+                {loading
+                  ? "—"
+                  : `Rs. ${stats.todaysCollection.toLocaleString()}`}
               </p>
               <p className="mt-2 text-sm text-slate-500">
-                {todaysCollection === 0
-                  ? "No payments received yet today."
-                  : "Received across all payment methods."}
+                {stats.todaysCollection === 0
+                  ? "No payments recorded for today's date."
+                  : "Received across all payment methods today."}
               </p>
             </div>
 
             <div className="w-full max-w-xs md:w-72">
               <div className="mb-2 flex items-center justify-between text-xs font-medium text-slate-500">
                 <span>Collected this month</span>
-                <span className="tabular-nums text-slate-700">{collectedPct}%</span>
+                <span className="tabular-nums text-slate-700">
+                  {loading ? "—" : `${stats.collectedPct}%`}
+                </span>
               </div>
               <div className="h-2.5 overflow-hidden rounded-full bg-slate-200">
                 <div
-                  className="h-full rounded-full bg-slate-900"
-                  style={{ width: `${collectedPct}%` }}
+                  className="h-full rounded-full bg-slate-900 transition-all duration-500"
+                  style={{ width: loading ? "0%" : `${stats.collectedPct}%` }}
                 />
               </div>
               <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-slate-500 tabular-nums">
-                <span>Rs. {monthCollection.toLocaleString()} collected</span>
-                <span>Rs. {monthTarget.toLocaleString()} billed</span>
+                <span>
+                  Rs. {stats.monthCollection.toLocaleString()} collected
+                </span>
+                <span>Rs. {stats.monthTarget.toLocaleString()} billed</span>
               </div>
             </div>
           </div>
@@ -110,21 +302,26 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Card className="border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
           <CardContent className="py-5">
-            <h2 className="mb-4 text-base font-semibold text-slate-900">Cash Flow</h2>
+            <h2 className="mb-4 text-base font-semibold text-slate-900">
+              Cash Flow
+            </h2>
             <div className="space-y-0">
               {cashFlow.map((row) => (
-                <div key={row.label} className="flex items-center justify-between border-t border-slate-200 py-3 first:border-t-0">
+                <div
+                  key={row.label}
+                  className="flex items-center justify-between border-t border-slate-200 py-3 first:border-t-0"
+                >
                   <span className="text-sm text-slate-500">{row.label}</span>
                   <span
                     className={`text-sm font-semibold tabular-nums ${
                       row.tone === "positive"
                         ? "text-emerald-600"
                         : row.tone === "negative"
-                        ? "text-rose-600"
-                        : "text-slate-700"
+                          ? "text-rose-600"
+                          : "text-slate-700"
                     }`}
                   >
-                    Rs. {row.value.toLocaleString()}
+                    {loading ? "—" : `Rs. ${row.value.toLocaleString()}`}
                   </span>
                 </div>
               ))}
@@ -134,12 +331,19 @@ export default function DashboardPage() {
 
         <Card className="border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
           <CardContent className="py-5">
-            <h2 className="mb-4 text-base font-semibold text-slate-900">Enrollment</h2>
+            <h2 className="mb-4 text-base font-semibold text-slate-900">
+              Enrollment
+            </h2>
             <div className="space-y-0">
               {enrollment.map((row) => (
-                <div key={row.label} className="flex items-center justify-between border-t border-slate-200 py-3 first:border-t-0">
+                <div
+                  key={row.label}
+                  className="flex items-center justify-between border-t border-slate-200 py-3 first:border-t-0"
+                >
                   <span className="text-sm text-slate-500">{row.label}</span>
-                  <span className="text-sm font-semibold tabular-nums text-slate-800">{row.value}</span>
+                  <span className="text-sm font-semibold tabular-nums text-slate-800">
+                    {loading ? "—" : row.value}
+                  </span>
                 </div>
               ))}
             </div>
