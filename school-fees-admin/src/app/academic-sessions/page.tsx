@@ -243,7 +243,7 @@ export default function AcademicSessionsPage() {
             <DialogTrigger className="inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium bg-slate-900 text-white hover:bg-slate-800 h-9 px-3">
               <Plus className="h-4 w-4" /> Add Session
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[400px]">
+            <DialogContent className="sm:max-w-105">
               <DialogHeader>
                 <DialogTitle>Add Academic Session</DialogTitle>
                 <DialogDescription>
@@ -444,7 +444,7 @@ export default function AcademicSessionsPage() {
                 <ArrowRightLeft className="mr-2 h-4 w-4" /> Execute Bulk
                 Promotion
               </DialogTrigger>
-              <DialogContent className="sm:max-w-[420px]">
+              <DialogContent className="sm:max-w-105">
                 <DialogHeader>
                   <DialogTitle>Confirm Bulk Promotion</DialogTitle>
                   <DialogDescription>
@@ -477,7 +477,7 @@ export default function AcademicSessionsPage() {
 
       {/* Edit Session Modal */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="sm:max-w-[400px]">
+        <DialogContent className="sm:max-w-100">
           <DialogHeader>
             <DialogTitle>Edit Academic Session</DialogTitle>
             <DialogDescription>Update session title</DialogDescription>

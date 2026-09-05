@@ -215,7 +215,7 @@ export default function DashboardPage() {
   }, [router]);
 
   if (!authChecked || !authenticated) {
-    return <div className="fixed inset-0 z-[9999] min-h-screen bg-[#f4f2ee]" />;
+    return <div className="fixed inset-0 z-9999 min-h-screen bg-[#f4f2ee]" />;
   }
 
   const cashFlow = [

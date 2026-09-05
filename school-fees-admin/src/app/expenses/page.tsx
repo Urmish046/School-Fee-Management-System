@@ -279,7 +279,7 @@ export default function ExpensesPage() {
           <DialogTrigger className="inline-flex items-center justify-center rounded-md text-sm font-medium bg-slate-900 text-slate-50 hover:bg-slate-800 h-10 px-4 py-2">
             <PlusCircle className="mr-2 h-4 w-4" /> Add Expense
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[480px] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="sm:max-w-120 max-h-[90vh] overflow-y-auto">
             <form onSubmit={handleCreateSubmit}>
               <DialogHeader>
                 <DialogTitle>Record New Expense</DialogTitle>
@@ -486,7 +486,7 @@ export default function ExpensesPage() {
 
       {/* Edit Expense Dialog */}
       <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <DialogContent className="sm:max-w-[480px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-120 max-h-[90vh] overflow-y-auto">
           <form onSubmit={handleEditSubmit}>
             <DialogHeader>
               <DialogTitle>Edit Expense</DialogTitle>

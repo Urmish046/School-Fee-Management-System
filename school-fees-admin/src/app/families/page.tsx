@@ -70,23 +70,32 @@ export default function FamiliesPage() {
       });
       if (searchTerm.trim()) params.set("search", searchTerm.trim());
 
-      const response = await fetch(`${API_URL}/api/families?${params.toString()}`, {
-        headers: { Accept: "application/json", ...getAuthHeaders() },
-      });
+      const response = await fetch(
+        `${API_URL}/api/families?${params.toString()}`,
+        {
+          headers: { Accept: "application/json", ...getAuthHeaders() },
+        },
+      );
 
       const body = await response.json().catch(() => null);
 
       if (!response.ok) {
-        throw new Error(body?.error || `Families request failed: ${response.status}`);
+        throw new Error(
+          body?.error || `Families request failed: ${response.status}`,
+        );
       }
 
       const payload = body as ApiFamilyListResponse;
-      setFamilies(Array.isArray(payload?.data) ? payload.data.map(apiFamilyToFamily) : []);
+      setFamilies(
+        Array.isArray(payload?.data) ? payload.data.map(apiFamilyToFamily) : [],
+      );
       setTotalPages(payload?.pagination?.totalPages ?? 1);
       setTotalCount(payload?.pagination?.total ?? payload?.count ?? 0);
     } catch (error) {
       console.error("Failed to load families:", error);
-      setLoadError(error instanceof Error ? error.message : "Failed to load families.");
+      setLoadError(
+        error instanceof Error ? error.message : "Failed to load families.",
+      );
       setFamilies([]);
       toast.error("Couldn't load families", {
         description: `Check that the API is running at ${API_URL} and that you're logged in.`,
@@ -193,11 +202,12 @@ export default function FamiliesPage() {
           <DialogTrigger className="inline-flex items-center justify-center rounded-md text-sm font-medium bg-slate-900 text-slate-50 hover:bg-slate-900/90 h-10 px-4 py-2">
             + Add Family
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[600px] max-h-[85vh] overflow-y-auto">
+          <DialogContent className="sm:max-w-120 max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Add New Family</DialogTitle>
               <DialogDescription>
-                Enter the details of the parents/guardians. A Family ID will be assigned automatically once saved.
+                Enter the details of the parents/guardians. A Family ID will be
+                assigned automatically once saved.
               </DialogDescription>
             </DialogHeader>
 
@@ -289,7 +299,9 @@ export default function FamiliesPage() {
                   id="emergencyContact"
                   placeholder="0300-1112223"
                   value={form.emergencyContact}
-                  onChange={(e) => updateField("emergencyContact", e.target.value)}
+                  onChange={(e) =>
+                    updateField("emergencyContact", e.target.value)
+                  }
                 />
               </div>
 
@@ -325,17 +337,23 @@ export default function FamiliesPage() {
                   id="scholarshipInfo"
                   placeholder="e.g. Merit scholarship, 20% tuition waiver"
                   value={form.scholarshipInfo}
-                  onChange={(e) => updateField("scholarshipInfo", e.target.value)}
+                  onChange={(e) =>
+                    updateField("scholarshipInfo", e.target.value)
+                  }
                 />
               </div>
 
               <div className="space-y-1.5 sm:col-span-2 border rounded-md p-3">
-                <Label className="mb-1 block">Family Concession (optional)</Label>
+                <Label className="mb-1 block">
+                  Family Concession (optional)
+                </Label>
                 <Input
                   type="number"
                   placeholder="Amount, e.g. 1000"
                   value={form.concessionValue}
-                  onChange={(e) => updateField("concessionValue", e.target.value)}
+                  onChange={(e) =>
+                    updateField("concessionValue", e.target.value)
+                  }
                 />
                 <p className="text-xs text-muted-foreground mt-1">
                   Stored as a single numeric amount (family_concession).
@@ -396,7 +414,10 @@ export default function FamiliesPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                  <TableCell
+                    colSpan={10}
+                    className="text-center py-8 text-muted-foreground"
+                  >
                     Loading families...
                   </TableCell>
                 </TableRow>
@@ -415,7 +436,10 @@ export default function FamiliesPage() {
                 </TableRow>
               ) : families.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                  <TableCell
+                    colSpan={10}
+                    className="text-center py-8 text-muted-foreground"
+                  >
                     No families found.
                   </TableCell>
                 </TableRow>
@@ -426,23 +450,36 @@ export default function FamiliesPage() {
                     className="cursor-pointer hover:bg-muted/50"
                     onClick={() => router.push(`/families/${family.id}`)}
                   >
-                    <TableCell className="font-medium">{family.familyId}</TableCell>
+                    <TableCell className="font-medium">
+                      {family.familyId}
+                    </TableCell>
                     <TableCell>{family.fatherName}</TableCell>
                     <TableCell>{family.motherName || "—"}</TableCell>
                     <TableCell>{family.contact}</TableCell>
                     <TableCell>{family.email || "—"}</TableCell>
                     <TableCell>
-                      {family.concession > 0 ? `Rs. ${family.concession.toLocaleString()}` : "—"}
+                      {family.concession > 0
+                        ? `Rs. ${family.concession.toLocaleString()}`
+                        : "—"}
                     </TableCell>
                     <TableCell>{family.scholarshipInfo || "—"}</TableCell>
-                    <TableCell>{formatDateForDisplay(family.admissionDate)}</TableCell>
                     <TableCell>
-                      <Badge variant={family.status === "Active" ? "default" : "secondary"}>
+                      {formatDateForDisplay(family.admissionDate)}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={
+                          family.status === "Active" ? "default" : "secondary"
+                        }
+                      >
                         {family.status}
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
+                      <div
+                        className="flex items-center gap-2"
+                        onClick={(event) => event.stopPropagation()}
+                      >
                         <button
                           type="button"
                           title="Edit family"
@@ -458,7 +495,8 @@ export default function FamiliesPage() {
                           onClick={() => handleDeleteFamily(family)}
                           className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2 py-1 text-sm text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          <Trash2 className="h-3.5 w-3.5" /> {deletingId === family.id ? "Deleting..." : "Delete"}
+                          <Trash2 className="h-3.5 w-3.5" />{" "}
+                          {deletingId === family.id ? "Deleting..." : "Delete"}
                         </button>
                       </div>
                     </TableCell>
@@ -483,7 +521,9 @@ export default function FamiliesPage() {
               <button
                 type="button"
                 disabled={page === totalPages || loading}
-                onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                onClick={() =>
+                  setPage((value) => Math.min(totalPages, value + 1))
+                }
                 className="rounded-md border px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Next

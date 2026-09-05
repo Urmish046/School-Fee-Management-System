@@ -224,7 +224,7 @@ export default function FeesPage() {
             <DialogTrigger className="inline-flex items-center justify-center rounded-md text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 h-10 px-4 py-2">
               <FileText className="mr-2 h-4 w-4" /> Generate {monthFilter} Fees
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[420px]">
+            <DialogContent className="sm:max-w-105">
               <DialogHeader>
                 <DialogTitle>Confirm Monthly Fee Generation</DialogTitle>
                 <DialogDescription>
