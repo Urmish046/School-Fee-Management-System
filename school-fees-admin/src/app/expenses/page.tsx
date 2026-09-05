@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   Table,
@@ -21,7 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-  DialogClose,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import {
@@ -31,113 +31,581 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CreditCard, PlusCircle, Download } from "lucide-react";
+import {
+  CreditCard,
+  PlusCircle,
+  Pencil,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
+import {
+  listExpenses,
+  createExpense,
+  updateExpense,
+  deleteExpense,
+  type ApiExpense,
+  type CreateExpensePayload,
+} from "@/lib/api/expenses";
+import { getAccounts, type ApiAccount } from "@/lib/api/accounts";
 
-// Dummy Expenses Data
-const mockExpenses = [
-  { id: "EXP-001", title: "Electricity Bill - August", category: "Utilities", amount: "Rs. 25,500", date: "25 Aug 2026", paidBy: "Admin" },
-  { id: "EXP-002", title: "Classroom Whiteboards & Markers", category: "Supplies", amount: "Rs. 8,000", date: "20 Aug 2026", paidBy: "Principal" },
-  { id: "EXP-003", title: "Repair of AC in Computer Lab", category: "Maintenance", amount: "Rs. 4,500", date: "15 Aug 2026", paidBy: "Admin" },
+const CATEGORIES = [
+  "Utilities",
+  "Supplies",
+  "Maintenance",
+  "Salaries",
+  "Printing & Stationery",
+  "Refreshments",
+  "Rent",
+  "Others",
 ];
 
-const paymentMethods = [
+const PAYMENT_METHODS = [
   "Cash",
-  "Bank",
-  "Online Transfer",
+  "Bank Transfer",
   "JazzCash",
   "Easypaisa",
   "Cheque",
-  "Credit Card",
-  "Debit Card",
-  "Other",
 ];
 
-export default function ExpensesPage() {
-  const [search, setSearch] = useState("");
+const initialForm: CreateExpensePayload = {
+  title: "",
+  category: "Utilities",
+  amount: 0,
+  payment_method: "Cash",
+  paid_to: "",
+  reference_no: "",
+  expense_date: new Date().toISOString().split("T")[0],
+  remarks: "",
+  account_id: undefined,
+};
 
-  const handleSaveExpense = () => {
-    toast.success("Expense Recorded!", {
-      description: "The new school expense has been added to the system.",
-    });
+export default function ExpensesPage() {
+  const [expenses, setExpenses] = useState<ApiExpense[]>([]);
+  const [accounts, setAccounts] = useState<ApiAccount[]>([]);
+  const [totalExpensesSum, setTotalExpensesSum] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Filters
+  const [search, setSearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("all");
+
+  // Create Modal State
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState<CreateExpensePayload>(initialForm);
+
+  // Edit Modal State
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<CreateExpensePayload>(initialForm);
+
+  const loadExpenses = async () => {
+    try {
+      setLoading(true);
+      const res = await listExpenses({
+        page,
+        limit: 10,
+        category: selectedCategory !== "all" ? selectedCategory : undefined,
+        search: search || undefined,
+      });
+
+      setExpenses(res.data || []);
+      setTotalExpensesSum(res.totalExpensesSum || 0);
+      setTotalCount(res.totalCount || 0);
+      setTotalPages(res.totalPages || 1);
+    } catch (error) {
+      toast.error("Failed to load expenses", {
+        description: error instanceof Error ? error.message : "Network error",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const filteredExpenses = mockExpenses.filter((exp) =>
-    exp.title.toLowerCase().includes(search.toLowerCase()) ||
-    exp.category.toLowerCase().includes(search.toLowerCase())
-  );
+  useEffect(() => {
+    loadExpenses();
+  }, [page, selectedCategory]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      loadExpenses();
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    getAccounts()
+      .then(setAccounts)
+      .catch(() => []);
+  }, []);
+
+  const handleCreateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (
+      !addForm.title.trim() ||
+      !addForm.amount ||
+      Number(addForm.amount) <= 0
+    ) {
+      toast.error("Title and an amount greater than 0 are required.");
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await createExpense({
+        ...addForm,
+        amount: Number(addForm.amount),
+        title: addForm.title.trim(),
+        paid_to: addForm.paid_to?.trim() || undefined,
+        reference_no: addForm.reference_no?.trim() || undefined,
+        remarks: addForm.remarks?.trim() || undefined,
+      });
+
+      toast.success("Expense Recorded!", {
+        description:
+          "The expense has been logged and debited from the account balance.",
+      });
+
+      setIsAddOpen(false);
+      setAddForm(initialForm);
+      loadExpenses();
+    } catch (error) {
+      toast.error("Failed to record expense", {
+        description: error instanceof Error ? error.message : "Request failed",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleOpenEdit = (exp: ApiExpense) => {
+    setEditingId(exp.id);
+    setEditForm({
+      title: exp.title,
+      category: exp.category,
+      amount: Number(exp.amount),
+      payment_method: exp.payment_method,
+      paid_to: exp.paid_to || "",
+      reference_no: exp.reference_no || "",
+      expense_date: exp.expense_date
+        ? new Date(exp.expense_date).toISOString().split("T")[0]
+        : new Date().toISOString().split("T")[0],
+      remarks: exp.remarks || "",
+      account_id: exp.account_id || undefined,
+    });
+    setIsEditOpen(true);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (
+      !editingId ||
+      !editForm.title.trim() ||
+      !editForm.amount ||
+      Number(editForm.amount) <= 0
+    ) {
+      toast.error("Title and a valid amount are required.");
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await updateExpense(editingId, {
+        ...editForm,
+        amount: Number(editForm.amount),
+        title: editForm.title.trim(),
+        paid_to: editForm.paid_to?.trim() || undefined,
+        reference_no: editForm.reference_no?.trim() || undefined,
+        remarks: editForm.remarks?.trim() || undefined,
+      });
+
+      toast.success("Expense Updated!", {
+        description:
+          "The expense and corresponding ledger record have been updated.",
+      });
+
+      setIsEditOpen(false);
+      setEditingId(null);
+      loadExpenses();
+    } catch (error) {
+      toast.error("Failed to update expense", {
+        description: error instanceof Error ? error.message : "Request failed",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteExpense = async (exp: ApiExpense) => {
+    if (
+      !confirm(
+        `Are you sure you want to delete "${exp.title}" (${exp.expense_no})? This will reverse the transaction in your accounts and ledger.`,
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await deleteExpense(exp.id);
+      toast.success("Expense Deleted", {
+        description: `${exp.expense_no} removed and account balances recalculated.`,
+      });
+      loadExpenses();
+    } catch (error) {
+      toast.error("Failed to delete expense", {
+        description: error instanceof Error ? error.message : "Request failed",
+      });
+    }
+  };
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">School Expenses</h1>
           <p className="text-sm text-muted-foreground">
-            Track and record operational costs, utility bills, and maintenance.
+            Track operational costs, utility bills, maintenance, and staff
+            payouts.
           </p>
         </div>
 
         {/* Add Expense Dialog */}
-        <Dialog>
-          <DialogTrigger className="inline-flex items-center justify-center rounded-md text-sm font-medium bg-slate-900 text-slate-50 hover:bg-slate-900/90 h-10 px-4 py-2">
+        <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+          <DialogTrigger className="inline-flex items-center justify-center rounded-md text-sm font-medium bg-slate-900 text-slate-50 hover:bg-slate-800 h-10 px-4 py-2">
             <PlusCircle className="mr-2 h-4 w-4" /> Add Expense
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[470px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Record New Expense</DialogTitle>
-              <DialogDescription>
-                Enter the details of the school expenditure.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              {/* Expense ID */}
-              <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
-                <Label htmlFor="expenseId" className="sm:text-right">Expense ID</Label>
-                <Input id="expenseId" placeholder="EXP-010" className="w-full" />
-              </div>
+          <DialogContent className="sm:max-w-[480px] max-h-[90vh] overflow-y-auto">
+            <form onSubmit={handleCreateSubmit}>
+              <DialogHeader>
+                <DialogTitle>Record New Expense</DialogTitle>
+                <DialogDescription>
+                  Enter expenditure details. It will be debited from the chosen
+                  account.
+                </DialogDescription>
+              </DialogHeader>
 
-              {/* Title / Description */}
-              <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
-                <Label htmlFor="title" className="sm:text-right">Title</Label>
-                <Input id="title" placeholder="e.g. Internet Bill" className="w-full" />
-              </div>
+              <div className="grid gap-4 py-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="addTitle">
+                    Expense Title <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="addTitle"
+                    placeholder="e.g. Electricity Bill - Main Campus"
+                    value={addForm.title}
+                    onChange={(e) =>
+                      setAddForm((p) => ({ ...p, title: e.target.value }))
+                    }
+                    required
+                  />
+                </div>
 
-              {/* Category */}
-              <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
-                <Label htmlFor="category" className="sm:text-right">Category</Label>
-                <div className="w-full">
-                  <Select>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select category..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Utilities">Utilities (Electricity/Water)</SelectItem>
-                      <SelectItem value="Supplies">Stationery & Supplies</SelectItem>
-                      <SelectItem value="Maintenance">Maintenance & Repair</SelectItem>
-                      <SelectItem value="Salaries">Staff Salaries</SelectItem>
-                      <SelectItem value="Others">Others</SelectItem>
-                    </SelectContent>
-                  </Select>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Category</Label>
+                    <Select
+                      value={addForm.category}
+                      onValueChange={(val) =>
+                        setAddForm((p) => ({ ...p, category: val ?? "Others" }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Category">
+                          {addForm.category}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CATEGORIES.map((c) => (
+                          <SelectItem key={c} value={c}>
+                            {c}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="addAmount">
+                      Amount (PKR) <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="addAmount"
+                      type="number"
+                      placeholder="0"
+                      value={addForm.amount || ""}
+                      onChange={(e) =>
+                        setAddForm((p) => ({
+                          ...p,
+                          amount: Number(e.target.value),
+                        }))
+                      }
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Paid From Account</Label>
+                    <Select
+                      value={
+                        addForm.account_id ? String(addForm.account_id) : ""
+                      }
+                      onValueChange={(val) =>
+                        setAddForm((p) => ({
+                          ...p,
+                          account_id: val ? Number(val) : undefined,
+                        }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Auto (by method)">
+                          {
+                            accounts.find((a) => a.id === addForm.account_id)
+                              ?.name
+                          }
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {accounts.map((acc) => (
+                          <SelectItem key={acc.id} value={String(acc.id)}>
+                            {acc.name} ({acc.type})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label>Payment Method</Label>
+                    <Select
+                      value={addForm.payment_method}
+                      onValueChange={(val) =>
+                        setAddForm((p) => ({
+                          ...p,
+                          payment_method: val ?? "Cash",
+                        }))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Method">
+                          {addForm.payment_method}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PAYMENT_METHODS.map((m) => (
+                          <SelectItem key={m} value={m}>
+                            {m}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="addPaidTo">Paid To (Vendor/Staff)</Label>
+                    <Input
+                      id="addPaidTo"
+                      placeholder="e.g. WAPDA / Ali Stationers"
+                      value={addForm.paid_to || ""}
+                      onChange={(e) =>
+                        setAddForm((p) => ({ ...p, paid_to: e.target.value }))
+                      }
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="addRef">Invoice / Bill #</Label>
+                    <Input
+                      id="addRef"
+                      placeholder="e.g. BILL-9874"
+                      value={addForm.reference_no || ""}
+                      onChange={(e) =>
+                        setAddForm((p) => ({
+                          ...p,
+                          reference_no: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="addDate">Date</Label>
+                    <Input
+                      id="addDate"
+                      type="date"
+                      value={addForm.expense_date}
+                      onChange={(e) =>
+                        setAddForm((p) => ({
+                          ...p,
+                          expense_date: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="addRemarks">Remarks / Notes</Label>
+                    <Input
+                      id="addRemarks"
+                      placeholder="Optional remarks"
+                      value={addForm.remarks || ""}
+                      onChange={(e) =>
+                        setAddForm((p) => ({ ...p, remarks: e.target.value }))
+                      }
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* Amount */}
-              <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
-                <Label htmlFor="amount" className="sm:text-right">Amount</Label>
-                <Input id="amount" type="number" placeholder="0" className="w-full" />
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsAddOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={submitting}>
+                  {submitting ? "Saving..." : "Save Expense"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* Edit Expense Dialog */}
+      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+        <DialogContent className="sm:max-w-[480px] max-h-[90vh] overflow-y-auto">
+          <form onSubmit={handleEditSubmit}>
+            <DialogHeader>
+              <DialogTitle>Edit Expense</DialogTitle>
+              <DialogDescription>
+                Modify the expenditure details. Changes will automatically
+                synchronize with your accounts ledger.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="grid gap-4 py-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="editTitle">
+                  Expense Title <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="editTitle"
+                  value={editForm.title}
+                  onChange={(e) =>
+                    setEditForm((p) => ({ ...p, title: e.target.value }))
+                  }
+                  required
+                />
               </div>
 
-              {/* Payment Method */}
-              <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
-                <Label htmlFor="paymentMethod" className="sm:text-right">Payment Method</Label>
-                <div className="w-full">
-                  <Select>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select payment method..." />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Category</Label>
+                  <Select
+                    value={editForm.category}
+                    onValueChange={(val) =>
+                      setEditForm((p) => ({ ...p, category: val ?? "Others" }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Category">
+                        {editForm.category}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      {paymentMethods.map((method) => (
-                        <SelectItem key={method} value={method}>
-                          {method}
+                      {CATEGORIES.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="editAmount">
+                    Amount (PKR) <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="editAmount"
+                    type="number"
+                    value={editForm.amount || ""}
+                    onChange={(e) =>
+                      setEditForm((p) => ({
+                        ...p,
+                        amount: Number(e.target.value),
+                      }))
+                    }
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Paid From Account</Label>
+                  <Select
+                    value={
+                      editForm.account_id ? String(editForm.account_id) : ""
+                    }
+                    onValueChange={(val) =>
+                      setEditForm((p) => ({
+                        ...p,
+                        account_id: val ? Number(val) : undefined,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Account">
+                        {
+                          accounts.find((a) => a.id === editForm.account_id)
+                            ?.name
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {accounts.map((acc) => (
+                        <SelectItem key={acc.id} value={String(acc.id)}>
+                          {acc.name} ({acc.type})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label>Payment Method</Label>
+                  <Select
+                    value={editForm.payment_method}
+                    onValueChange={(val) =>
+                      setEditForm((p) => ({
+                        ...p,
+                        payment_method: val ?? "Cash",
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Method">
+                        {editForm.payment_method}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PAYMENT_METHODS.map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {m}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -145,58 +613,94 @@ export default function ExpensesPage() {
                 </div>
               </div>
 
-              {/* Paid To */}
-              <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
-                <Label htmlFor="paidTo" className="sm:text-right">Paid To</Label>
-                <Input id="paidTo" placeholder="Vendor / Staff / Person" className="w-full" />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="editPaidTo">Paid To</Label>
+                  <Input
+                    id="editPaidTo"
+                    value={editForm.paid_to || ""}
+                    onChange={(e) =>
+                      setEditForm((p) => ({ ...p, paid_to: e.target.value }))
+                    }
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="editRef">Invoice / Bill #</Label>
+                  <Input
+                    id="editRef"
+                    value={editForm.reference_no || ""}
+                    onChange={(e) =>
+                      setEditForm((p) => ({
+                        ...p,
+                        reference_no: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
               </div>
 
-              {/* Receipt / Reference */}
-              <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
-                <Label htmlFor="referenceNo" className="sm:text-right">Reference No.</Label>
-                <Input id="referenceNo" placeholder="INV-1001 / Bill #" className="w-full" />
-              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="editDate">Date</Label>
+                  <Input
+                    id="editDate"
+                    type="date"
+                    value={editForm.expense_date}
+                    onChange={(e) =>
+                      setEditForm((p) => ({
+                        ...p,
+                        expense_date: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
 
-              {/* Date */}
-              <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
-                <Label htmlFor="date" className="sm:text-right">Date</Label>
-                <Input id="date" type="date" className="w-full" />
+                <div className="space-y-1.5">
+                  <Label htmlFor="editRemarks">Remarks</Label>
+                  <Input
+                    id="editRemarks"
+                    value={editForm.remarks || ""}
+                    onChange={(e) =>
+                      setEditForm((p) => ({ ...p, remarks: e.target.value }))
+                    }
+                  />
+                </div>
               </div>
-
-              {/* Remarks */}
-              <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-start">
-                <Label htmlFor="remarks" className="sm:text-right pt-2">Remarks</Label>
-                <Input id="remarks" placeholder="Optional audit notes" className="w-full" />
-              </div>
-
-              {/* Attachment */}
-              <div className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center">
-                <Label htmlFor="attachment" className="sm:text-right">Attachment</Label>
-                <Input id="attachment" type="file" className="w-full" />
-              </div>
-
             </div>
-            <div className="flex justify-end">
-              <DialogClose 
-                onClick={handleSaveExpense}
-                className="inline-flex items-center justify-center rounded-md text-sm font-medium bg-slate-900 text-white hover:bg-slate-800 h-10 px-4 py-2"
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsEditOpen(false)}
               >
-                Save Expense
-              </DialogClose>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Updating..." : "Update Expense"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-      {/* Summary Cards */}
+      {/* Summary Card */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Expenses (August)</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              Total Recorded Expenses
+            </CardTitle>
             <CreditCard className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">Rs. 38,000</div>
+            <div className="text-2xl font-bold text-red-600">
+              Rs. {Number(totalExpensesSum).toLocaleString()}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Cumulative outflows logged across all accounts.
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -204,13 +708,34 @@ export default function ExpensesPage() {
       {/* Expenses Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Recent Expenses</CardTitle>
-          <Input
-            placeholder="Search by title or category..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="max-w-sm mt-2"
-          />
+          <CardTitle>Expense Records ({totalCount})</CardTitle>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+            <Input
+              placeholder="Search by title, expense no, vendor, or category..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <Select
+              value={selectedCategory}
+              onValueChange={(val) => setSelectedCategory(val ?? "all")}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Category">
+                  {selectedCategory === "all"
+                    ? "All Categories"
+                    : selectedCategory}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                {CATEGORIES.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </CardHeader>
         <CardContent>
           <Table>
@@ -219,28 +744,114 @@ export default function ExpensesPage() {
                 <TableHead>Expense ID</TableHead>
                 <TableHead>Title</TableHead>
                 <TableHead>Category</TableHead>
+                <TableHead>Paid From</TableHead>
                 <TableHead>Date</TableHead>
-                <TableHead>Approved By</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
+                <TableHead>Recorded By</TableHead>
+                <TableHead>Amount</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredExpenses.map((exp) => (
-                <TableRow key={exp.id} className="hover:bg-muted/50">
-                  <TableCell className="font-medium">{exp.id}</TableCell>
-                  <TableCell>{exp.title}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{exp.category}</Badge>
-                  </TableCell>
-                  <TableCell>{exp.date}</TableCell>
-                  <TableCell className="text-muted-foreground">{exp.paidBy}</TableCell>
-                  <TableCell className="text-right font-semibold text-red-600">
-                    {exp.amount}
+              {loading ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={8}
+                    className="py-8 text-center text-muted-foreground"
+                  >
+                    Loading expenses...
                   </TableCell>
                 </TableRow>
-              ))}
+              ) : expenses.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={8}
+                    className="py-8 text-center text-muted-foreground"
+                  >
+                    No expense records found.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                expenses.map((exp) => (
+                  <TableRow key={exp.id} className="hover:bg-muted/50">
+                    <TableCell className="font-mono text-xs font-semibold">
+                      {exp.expense_no}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <span className="font-medium">{exp.title}</span>
+                        {exp.paid_to && (
+                          <span className="text-xs text-muted-foreground">
+                            To: {exp.paid_to}
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{exp.category}</Badge>
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {exp.account_name || exp.payment_method}
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {new Date(exp.expense_date).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs">
+                      {exp.recorded_by_name || "System"}
+                    </TableCell>
+                    <TableCell className="font-semibold text-red-600">
+                      - Rs. {Number(exp.amount).toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleOpenEdit(exp)}
+                          title="Edit Expense"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => handleDeleteExpense(exp)}
+                          title="Delete Expense"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
             </TableBody>
           </Table>
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between pt-4 border-t mt-4 text-sm text-muted-foreground">
+            <span>
+              Page {page} of {totalPages}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1 || loading}
+                onClick={() => setPage((p) => Math.max(p - 1, 1))}
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages || loading}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Next <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>

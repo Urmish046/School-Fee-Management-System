@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { mockLedgerEntries, openingBalance } from "@/lib/mock-ledger";
+import { useEffect, useState } from "react";
 import {
   Table,
   TableBody,
@@ -13,35 +12,122 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { ArrowUpRight, ArrowDownRight, Wallet } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import {
+  ArrowUpRight,
+  ArrowDownRight,
+  Wallet,
+  ChevronLeft,
+  ChevronRight,
+  Calendar,
+} from "lucide-react";
+import {
+  getLedger,
+  type LedgerSummary,
+  type LedgerTransaction,
+} from "@/lib/api/ledger";
 
 export default function LedgerPage() {
   const [search, setSearch] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-  const totalIncome = mockLedgerEntries
-    .filter((e) => e.type === "Income")
-    .reduce((sum, e) => sum + e.amount, 0);
+  const [summary, setSummary] = useState<LedgerSummary>({
+    opening_balance: 0,
+    total_income: 0,
+    total_expense: 0,
+    closing_balance: 0,
+  });
+  const [transactions, setTransactions] = useState<LedgerTransaction[]>([]);
 
-  const totalExpense = mockLedgerEntries
-    .filter((e) => e.type === "Expense")
-    .reduce((sum, e) => sum + e.amount, 0);
+  const loadLedgerData = async () => {
+    try {
+      setLoading(true);
+      const res = await getLedger({
+        start_date: startDate || undefined,
+        end_date: endDate || undefined,
+        search: search || undefined,
+        page,
+        limit: 15,
+      });
 
-  const closingBalance = openingBalance + totalIncome - totalExpense;
+      setSummary(res.summary);
+      setTransactions(res.transactions || []);
+      setTotalPages(res.pagination?.totalPages || 1);
+      setTotalCount(res.pagination?.total || 0);
+    } catch (error) {
+      toast.error("Failed to load ledger records", {
+        description: error instanceof Error ? error.message : "Network error",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const filteredEntries = mockLedgerEntries.filter(
-    (entry) =>
-      entry.description.toLowerCase().includes(search.toLowerCase()) ||
-      entry.category.toLowerCase().includes(search.toLowerCase()) ||
-      entry.id.toLowerCase().includes(search.toLowerCase())
-  );
+  useEffect(() => {
+    loadLedgerData();
+  }, [page, startDate, endDate]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      loadLedgerData();
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Owner Ledger</h1>
-        <p className="text-sm text-muted-foreground">
-          Opening balance, income, expenses and closing balance overview.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Owner Ledger</h1>
+          <p className="text-sm text-muted-foreground">
+            Opening balance, income, expenses, and closing balance overview.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 bg-background border rounded-md px-2.5 py-1 text-sm">
+            <Calendar className="h-4 w-4 text-muted-foreground" />
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                setPage(1);
+              }}
+              className="bg-transparent border-none outline-none text-xs"
+            />
+            <span className="text-muted-foreground">to</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                setPage(1);
+              }}
+              className="bg-transparent border-none outline-none text-xs"
+            />
+          </div>
+          {(startDate || endDate) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setStartDate("");
+                setEndDate("");
+                setPage(1);
+              }}
+            >
+              Clear
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -55,7 +141,7 @@ export default function LedgerPage() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold">
-              Rs. {openingBalance.toLocaleString()}
+              Rs. {Number(summary.opening_balance).toLocaleString()}
             </p>
           </CardContent>
         </Card>
@@ -69,7 +155,7 @@ export default function LedgerPage() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold text-green-600">
-              + Rs. {totalIncome.toLocaleString()}
+              + Rs. {Number(summary.total_income).toLocaleString()}
             </p>
           </CardContent>
         </Card>
@@ -83,7 +169,7 @@ export default function LedgerPage() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold text-red-600">
-              - Rs. {totalExpense.toLocaleString()}
+              - Rs. {Number(summary.total_expense).toLocaleString()}
             </p>
           </CardContent>
         </Card>
@@ -98,24 +184,26 @@ export default function LedgerPage() {
           <CardContent>
             <p
               className={`text-2xl font-bold ${
-                closingBalance >= 0 ? "text-green-700" : "text-red-700"
+                summary.closing_balance >= 0 ? "text-green-700" : "text-red-700"
               }`}
             >
-              Rs. {closingBalance.toLocaleString()}
+              Rs. {Number(summary.closing_balance).toLocaleString()}
             </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Formula strip */}
+      {/* Formula Strip */}
       <Card className="bg-muted/30">
         <CardContent className="py-4">
           <p className="text-sm text-center font-medium">
-            Opening Balance (Rs. {openingBalance.toLocaleString()}) + Income
-            (Rs. {totalIncome.toLocaleString()}) − Expenses (Rs.{" "}
-            {totalExpense.toLocaleString()}) ={" "}
+            Opening Balance (Rs.{" "}
+            {Number(summary.opening_balance).toLocaleString()}) + Income (Rs.{" "}
+            {Number(summary.total_income).toLocaleString()}) − Expenses (Rs.{" "}
+            {Number(summary.total_expense).toLocaleString()}) ={" "}
             <span className="font-bold">
-              Closing Balance: Rs. {closingBalance.toLocaleString()}
+              Closing Balance: Rs.{" "}
+              {Number(summary.closing_balance).toLocaleString()}
             </span>
           </p>
         </CardContent>
@@ -124,9 +212,9 @@ export default function LedgerPage() {
       {/* Transactions Table */}
       <Card>
         <CardHeader>
-          <CardTitle>All Transactions ({filteredEntries.length})</CardTitle>
+          <CardTitle>All Transactions ({totalCount})</CardTitle>
           <Input
-            placeholder="Search by description, category or ID..."
+            placeholder="Search by description, category, reference, or account..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="max-w-sm mt-2"
@@ -136,42 +224,104 @@ export default function LedgerPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Entry ID</TableHead>
                 <TableHead>Date</TableHead>
+                <TableHead>Account</TableHead>
                 <TableHead>Description</TableHead>
-                <TableHead>Category</TableHead>
+                <TableHead>Category / Ref</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredEntries.map((entry) => (
-                <TableRow key={entry.id} className="hover:bg-muted/50">
-                  <TableCell className="font-medium">{entry.id}</TableCell>
-                  <TableCell>{entry.date}</TableCell>
-                  <TableCell>{entry.description}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{entry.category}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={entry.type === "Income" ? "default" : "destructive"}
-                    >
-                      {entry.type}
-                    </Badge>
-                  </TableCell>
+              {loading ? (
+                <TableRow>
                   <TableCell
-                    className={`text-right font-semibold ${
-                      entry.type === "Income" ? "text-green-600" : "text-red-600"
-                    }`}
+                    colSpan={6}
+                    className="py-8 text-center text-muted-foreground"
                   >
-                    {entry.type === "Income" ? "+" : "-"} Rs.{" "}
-                    {entry.amount.toLocaleString()}
+                    Loading ledger transactions...
                   </TableCell>
                 </TableRow>
-              ))}
+              ) : transactions.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={6}
+                    className="py-8 text-center text-muted-foreground"
+                  >
+                    No transactions recorded for the selected range.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                transactions.map((entry) => {
+                  const isInflow = entry.type === "INFLOW";
+                  return (
+                    <TableRow key={entry.id} className="hover:bg-muted/50">
+                      <TableCell className="text-xs">
+                        {new Date(entry.date).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell className="font-medium text-xs">
+                        {entry.account_name}
+                      </TableCell>
+                      <TableCell>{entry.description || "—"}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-semibold">
+                            {entry.category}
+                          </span>
+                          {entry.reference_id && (
+                            <span className="font-mono text-xs text-muted-foreground">
+                              {entry.reference_id}
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={isInflow ? "default" : "destructive"}
+                          className="text-xs"
+                        >
+                          {isInflow ? "Inflow" : "Outflow"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell
+                        className={`text-right font-semibold ${
+                          isInflow ? "text-green-600" : "text-red-600"
+                        }`}
+                      >
+                        {isInflow ? "+" : "-"} Rs.{" "}
+                        {Number(entry.amount).toLocaleString()}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
             </TableBody>
           </Table>
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between pt-4 border-t mt-4 text-sm text-muted-foreground">
+            <span>
+              Page {page} of {totalPages}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1 || loading}
+                onClick={() => setPage((p) => Math.max(p - 1, 1))}
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages || loading}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Next <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>
