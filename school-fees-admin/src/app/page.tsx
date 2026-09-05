@@ -11,11 +11,15 @@ import { listFamilies } from "@/lib/api/families";
 import { listPayments } from "@/lib/api/payments";
 import { listInvoices } from "@/lib/api/invoices";
 
-// Extract clean YYYY-MM-DD from any string without timezone shifts
-function toDateStr(val: any): string {
+// Robust date normalizer: converts any date string, ISO format, or Date object to YYYY-MM-DD
+function normalizeDate(val: unknown): string {
   if (!val) return "";
-  if (typeof val === "string") return val.substring(0, 10);
-  const d = new Date(val);
+  if (typeof val === "string") {
+    const match = val.match(/^\d{4}-\d{2}-\d{2}/);
+    if (match) return match[0];
+  }
+  const d = new Date(val as string | number | Date);
+  if (isNaN(d.getTime())) return "";
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
@@ -61,8 +65,11 @@ export default function DashboardPage() {
         setLoading(true);
 
         const now = new Date();
-        const todayStr = toDateStr(now);
-        const currentMonthStr = todayStr.substring(0, 7);
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, "0");
+        const day = String(now.getDate()).padStart(2, "0");
+        const todayStr = `${year}-${month}-${day}`;
+        const currentMonthStr = `${year}-${month}`;
 
         const [
           ledgerRes,
@@ -80,10 +87,10 @@ export default function DashboardPage() {
           listInvoices({ limit: 500 }).catch(() => null),
         ]);
 
-        // 1. Today's & Month's Collection
+        // 1. Collections
         const payments = paymentsRes?.data || [];
         const todaysCollection = payments
-          .filter((p: any) => toDateStr(p.payment_date) === todayStr)
+          .filter((p: any) => normalizeDate(p.payment_date) === todayStr)
           .reduce(
             (sum: number, p: any) => sum + (Number(p.amount_paid) || 0),
             0,
@@ -92,7 +99,7 @@ export default function DashboardPage() {
         const monthCollection =
           payments
             .filter((p: any) =>
-              toDateStr(p.payment_date).startsWith(currentMonthStr),
+              normalizeDate(p.payment_date).startsWith(currentMonthStr),
             )
             .reduce(
               (sum: number, p: any) => sum + (Number(p.amount_paid) || 0),
@@ -104,7 +111,7 @@ export default function DashboardPage() {
         const currentExpenses =
           expenses
             .filter((e: any) =>
-              toDateStr(e.expense_date).startsWith(currentMonthStr),
+              normalizeDate(e.expense_date).startsWith(currentMonthStr),
             )
             .reduce(
               (sum: number, e: any) => sum + (Number(e.amount) || 0),
@@ -161,10 +168,14 @@ export default function DashboardPage() {
             ? Math.min(Math.round((monthCollection / monthTarget) * 100), 100)
             : 0;
 
-        // 4. Enrollment & Breakdown
+        // 4. Enrollment
         const totalStudents =
-          studentsRes?.pagination?.total || studentsRes?.data?.length || 0;
-        const totalFamilies = familiesRes?.data?.length || 0;
+          studentsRes?.pagination?.total ?? studentsRes?.data?.length ?? 0;
+
+        const totalFamilies =
+          (familiesRes as any)?.pagination?.total ??
+          familiesRes?.data?.length ??
+          (Array.isArray(familiesRes) ? familiesRes.length : 0);
 
         const paidFamilies = currentMonthInvoices.filter(
           (inv: any) => inv.status === "Paid",
@@ -256,6 +267,7 @@ export default function DashboardPage() {
         </p>
       </div>
 
+      {/* Top Banner */}
       <Card className="border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
         <CardContent className="py-5">
           <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
@@ -299,6 +311,7 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
+      {/* Cash Flow and Enrollment Breakdown */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Card className="border-slate-200 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.04)]">
           <CardContent className="py-5">
